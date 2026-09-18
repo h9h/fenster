@@ -100,6 +100,7 @@ via temp file plus rename.
       "title": "fenster - Visual Studio Code",
       "ordinal": 0,
       "rect": {"x": 227, "y": -682, "w": 1129, "h": 635},
+      "screen": {"x": 227, "y": -682, "w": 1129, "h": 635},
       "state": "normal",
       "topmost": false,
       "include": true
@@ -114,10 +115,45 @@ Field notes:
   matching key.
 - `rect` — the *restored* rectangle (from `WINDOWPLACEMENT.rcNormalPosition`),
   in physical pixels, even for a window that was maximized at save time.
-- `state` — one of `normal`, `minimized`, `maximized`.
+- `screen` — the rectangle the window actually occupied on screen at save
+  time (`GetWindowRect`), in physical pixels. Added alongside `rect` to fix
+  windows snapped via Windows Snap (Win+arrow, Snap Layouts): Windows
+  deliberately keeps `rcNormalPosition` as the *pre-snap* rectangle while
+  `showCmd` still reads `SW_SHOWNORMAL`, so `rect` alone restores a snapped
+  window at its pre-snap size and position instead of where it visibly was.
+  For an ordinary, non-snapped window `screen` equals `rect`. A zero or
+  non-positive `screen` (including the zero value decoded from a
+  `layouts.json` written before this field existed) means "absent, behave
+  as before": restore purely from `rect`. This did **not** bump
+  `version` — a file without `screen` decodes with a zero value, and a
+  file with `screen` decodes fine on a binary that predates the field (the
+  unknown key is ignored) — so the change is both backward and forward
+  compatible.
+- `state` — one of `normal`, `minimized`, `maximized`. `screen` is only used
+  for `normal`; `minimized` and `maximized` always restore from `rect`,
+  since a minimized window's `GetWindowRect` is the meaningless off-screen
+  `(-32000, -32000)` Windows reports for any minimized window.
 - `include` — persisted checkbox state, see "Selection model".
 - `version` — schema version; a file with a higher version than the binary
   understands is refused rather than rewritten.
+
+**Known limitation:** Windows exposes no public API to put a restored
+window back into a snap *group*. Applying `screen` puts the window on the
+correct area of the desktop, but Windows will not treat it as snapped
+afterwards — neighbouring windows will not resize together with it the way
+real snap-group members do. This is accepted as out of scope; in particular,
+synthesizing Win+arrow keystrokes to re-invoke Windows' own snap engine is
+deliberately not attempted.
+
+**A second, separate limitation:** restoring does not preserve the native
+"drag away to recover the pre-snap size" behaviour either. The trailing
+`SetWindowPos` in the restore algorithm (step 4 above) resyncs
+`rcNormalPosition` to `screen`, so immediately after restore the window's
+own remembered "normal" rectangle is `screen`, not the original `rect` —
+there is no pre-snap size left for Windows to fall back to if the user
+drags the restored window away. The next capture or overwrite of that
+window accordingly records `rect == screen`, so the original pre-snap
+rectangle is lost for good after one restore cycle.
 
 ## Monitor setup fingerprint
 
@@ -185,11 +221,15 @@ checkmark cannot represent a transient per-restore selection. Instead:
       best one at or above `0.6`. The threshold is a package constant so it can
       be tuned against real titles.
    3. Same executable path, matched by `ordinal` among the remainder.
-3. For each match, if the target rectangle lies entirely outside the current
-   virtual screen, shift it onto the nearest monitor's work area (relevant when
-   restoring a layout from a foreign setup).
-4. Apply: `SetWindowPlacement` with the stored normal rectangle and the stored
-   show command, then `SetWindowPos` with `HWND_TOPMOST` / `HWND_NOTOPMOST` for
+3. For each match, clamp both `rect` and, when present and valid, `screen`
+   independently: if either rectangle lies entirely outside the current
+   virtual screen, shift it onto the nearest monitor's work area (relevant
+   when restoring a layout from a foreign setup). An absent `screen` is left
+   untouched rather than clamped, since there is nothing real to clamp.
+4. Apply: `SetWindowPlacement` with the stored normal rectangle (`rect`) and
+   the stored show command, then, for a normal-state window only,
+   `SetWindowPos` to `screen` when present and valid (falling back to `rect`
+   otherwise), then `SetWindowPos` with `HWND_TOPMOST` / `HWND_NOTOPMOST` for
    the always-on-top flag.
 5. Report the outcome in one tray balloon:
    `7 Fenster wiederhergestellt, 2 übersprungen (nicht offen)`.

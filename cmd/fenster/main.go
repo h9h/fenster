@@ -326,8 +326,8 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 			deselected++
 			continue
 		}
-		rect := layout.Clamp(m.Entry.Rect, mons)
-		if err := win32.ApplyPlacement(m.Live.Handle, rect, m.Entry.State, m.Entry.Topmost); err != nil {
+		rect, screen := clampEntry(m.Entry, mons)
+		if err := win32.ApplyPlacement(m.Live.Handle, rect, screen, m.Entry.State, m.Entry.Topmost); err != nil {
 			log.Printf("restoring %q %q: %v", m.Entry.Exe, m.Entry.Title, err)
 			failed++
 			continue
@@ -337,6 +337,25 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 	missing = len(plan.Missing)
 
 	a.notify(restoreMessage(restored, deselected, missing, failed))
+}
+
+// clampEntry computes the two rectangles a restore applies for one saved
+// entry, each clamped against the current monitors independently so a
+// layout restored on a foreign monitor setup still lands on screen.
+//
+// The restored rect is always clamped. The screen rect is only clamped when
+// it is present and valid (W>0 and H>0); an absent Screen (the zero value,
+// from a layout saved before that field existed) is left untouched rather
+// than "clamped" into a bogus on-screen rectangle at (0,0) — Clamp has no
+// way to tell a deliberate zero-size rect from a merely-absent one, so that
+// distinction is made here instead.
+func clampEntry(e store.WindowEntry, mons []store.Monitor) (rect, screen store.Rect) {
+	rect = layout.Clamp(e.Rect, mons)
+	screen = e.Screen
+	if screen.W > 0 && screen.H > 0 {
+		screen = layout.Clamp(screen, mons)
+	}
+	return rect, screen
 }
 
 // actionToggleInclude flips one window's persisted checkbox and reports
@@ -545,6 +564,7 @@ func toLive(infos []win32.WindowInfo) []layout.Live {
 			Class:   w.Class,
 			Exe:     w.Exe,
 			Rect:    w.Rect,
+			Screen:  w.Screen,
 			State:   w.State,
 			Topmost: w.Topmost,
 			Visible: w.Visible,

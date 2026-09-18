@@ -99,7 +99,7 @@ func TestApplyPlacementMovesARealWindow(t *testing.T) {
 	defer cleanup()
 
 	want := store.Rect{X: 120, Y: 140, W: 640, H: 480}
-	if err := ApplyPlacement(hwnd, want, store.StateNormal, false); err != nil {
+	if err := ApplyPlacement(hwnd, want, store.Rect{}, store.StateNormal, false); err != nil {
 		t.Fatalf("ApplyPlacement: %v", err)
 	}
 
@@ -108,12 +108,126 @@ func TestApplyPlacementMovesARealWindow(t *testing.T) {
 		t.Errorf("rect = %+v, want %+v", got.Rect, want)
 	}
 
-	if err := ApplyPlacement(hwnd, want, store.StateMaximized, false); err != nil {
+	if err := ApplyPlacement(hwnd, want, store.Rect{}, store.StateMaximized, false); err != nil {
 		t.Fatalf("ApplyPlacement(maximized): %v", err)
 	}
 	if got := describeWindow(hwnd); got.State != store.StateMaximized {
 		t.Errorf("state = %q, want maximized", got.State)
 	}
+}
+
+// TestApplyPlacementUsesScreenRectForNormalWindows is the real proof of the
+// snapped-window fix: when r (the restored/pre-snap rectangle) and screen
+// (the actual on-screen rectangle) deliberately differ, a normal-state
+// window must end up on screen at screen, not at r — i.e. ApplyPlacement
+// actually uses screen rather than silently falling back to r whenever both
+// are present and valid.
+//
+// It does NOT also assert that rcNormalPosition still reads back as r after
+// the call returns, even though that is the persistent split a genuinely
+// Windows-Snapped window shows on a live desktop (see the confirmed
+// GetWindowRect-vs-rcNormalPosition table in the bug report). A dedicated
+// probe against this window (SetWindowPlacement(r) then SetWindowPos(screen),
+// and the reverse order, on a freshly created, never-snapped window) showed
+// that whichever of the two public calls runs last determines BOTH
+// GetWindowRect and GetWindowPlacement's rcNormalPosition — Windows
+// resyncs the "normal" rect to match the window's actual bounds for an
+// ordinary restored-state window. The persistent divergence the bug report
+// measured is maintained by Windows' own Snap engine through some internal
+// path that is not reachable via SetWindowPlacement/SetWindowPos, and the
+// task explicitly rules out synthesizing Win+arrow to invoke that engine.
+// Calling SetWindowPlacement(r) before SetWindowPos(screen) — the order
+// used below and in ApplyPlacement — is still the right and only choice
+// between the two orders: reversing it would leave the window sitting at r
+// instead of screen, undoing the fix entirely (verified with the same
+// probe). So immediately after ApplyPlacement returns, rcNormalPosition is
+// expected to read back as screen, not r; that is a Windows-enforced
+// limitation, not a defect in this function, and is consistent with the
+// documented, accepted limitation that a fenster-restored window is not
+// treated as snapped by Windows afterwards.
+func TestApplyPlacementUsesScreenRectForNormalWindows(t *testing.T) {
+	EnableDPIAwareness()
+
+	hwnd, cleanup, err := createTestWindow()
+	if err != nil {
+		t.Fatalf("createTestWindow: %v", err)
+	}
+	defer cleanup()
+
+	restored := store.Rect{X: 100, Y: 120, W: 500, H: 400}
+	screen := store.Rect{X: 250, Y: 60, W: 900, H: 700}
+	if restored == screen {
+		t.Fatal("test setup: restored and screen must differ to prove anything")
+	}
+
+	if err := ApplyPlacement(hwnd, restored, screen, store.StateNormal, false); err != nil {
+		t.Fatalf("ApplyPlacement: %v", err)
+	}
+
+	gotScreen, ok := windowRect(hwnd)
+	if !ok {
+		t.Fatal("windowRect: failed")
+	}
+	if gotScreen != screen {
+		t.Errorf("GetWindowRect = %+v, want the screen rect %+v", gotScreen, screen)
+	}
+
+	got := describeWindow(hwnd)
+	if got.State != store.StateNormal {
+		t.Errorf("state = %q, want normal", got.State)
+	}
+}
+
+// TestApplyPlacementIgnoresScreenRectWhenMinimizedOrMaximized pins that a
+// differing screen rect has no effect on the two states where using it would
+// be actively harmful: a minimized window's GetWindowRect legitimately
+// reports (-32000,-32000), and a maximized window is positioned by
+// SW_SHOWMAXIMIZED itself, not by screen. In both cases rcNormalPosition
+// must still come from r, and ApplyPlacement must not attempt to place the
+// window at the (deliberately nonsensical) screen rect.
+func TestApplyPlacementIgnoresScreenRectWhenMinimizedOrMaximized(t *testing.T) {
+	EnableDPIAwareness()
+
+	restored := store.Rect{X: 100, Y: 120, W: 500, H: 400}
+	bogusScreen := store.Rect{X: -32000, Y: -32000, W: 10, H: 10}
+
+	t.Run("minimized", func(t *testing.T) {
+		hwnd, cleanup, err := createTestWindow()
+		if err != nil {
+			t.Fatalf("createTestWindow: %v", err)
+		}
+		defer cleanup()
+
+		if err := ApplyPlacement(hwnd, restored, bogusScreen, store.StateMinimized, false); err != nil {
+			t.Fatalf("ApplyPlacement: %v", err)
+		}
+		got := describeWindow(hwnd)
+		if got.State != store.StateMinimized {
+			t.Errorf("state = %q, want minimized", got.State)
+		}
+		if got.Rect != restored {
+			t.Errorf("rcNormalPosition (Rect) = %+v, want the restored rect %+v", got.Rect, restored)
+		}
+	})
+
+	t.Run("maximized", func(t *testing.T) {
+		hwnd, cleanup, err := createTestWindow()
+		if err != nil {
+			t.Fatalf("createTestWindow: %v", err)
+		}
+		defer cleanup()
+
+		if err := ApplyPlacement(hwnd, restored, bogusScreen, store.StateMaximized, false); err != nil {
+			t.Fatalf("ApplyPlacement: %v", err)
+		}
+		got := describeWindow(hwnd)
+		if got.State != store.StateMaximized {
+			t.Errorf("state = %q, want maximized", got.State)
+		}
+		if got.Rect != restored {
+			t.Errorf("rcNormalPosition (Rect) = %+v, want the restored rect %+v", got.Rect, restored)
+		}
+	})
 }
 
 // TestApplyPlacementHandlesNegativeCoordinates places a window at a negative
@@ -156,7 +270,7 @@ func TestApplyPlacementHandlesNegativeCoordinates(t *testing.T) {
 		t.Fatalf("test setup produced a non-negative rect %+v from monitor %+v", want, target)
 	}
 
-	if err := ApplyPlacement(hwnd, want, store.StateNormal, false); err != nil {
+	if err := ApplyPlacement(hwnd, want, store.Rect{}, store.StateNormal, false); err != nil {
 		t.Fatalf("ApplyPlacement: %v", err)
 	}
 
