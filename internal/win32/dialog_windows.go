@@ -112,10 +112,13 @@ func InputBox(title, prompt, initial string) (string, bool) {
 		return "", false
 	}
 
+	hCursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	wc := wndClassEx{
 		CbSize:        uint32(unsafe.Sizeof(wndClassEx{})),
 		LpfnWndProc:   inputBoxWndProc,
 		HInstance:     hInstance,
+		HCursor:       hCursor,
+		HbrBackground: uintptr(colorBtnFace + 1),
 		LpszClassName: classPtr,
 	}
 	if atom, _, _ := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 {
@@ -169,11 +172,17 @@ func InputBox(title, prompt, initial string) (string, bool) {
 		hwnd, 0, hInstance, 0,
 	)
 
+	// CreateWindowExW's first argument is dwExStyle, not dwStyle. Fix round 1
+	// caught this control passing wsBorder (a dwStyle bit, WS_BORDER) into
+	// that dwExStyle slot: the border never rendered, and a reserved WS_EX_
+	// bit was set instead. wsBorder now lives in the dwStyle OR-list below,
+	// and wsExClientEdge (WS_EX_CLIENTEDGE) is passed as the real extended
+	// style, giving the conventional sunken edit-box look.
 	initialPtr, _ := syscall.UTF16PtrFromString(initial)
 	editHwnd, _, _ := procCreateWindowExW.Call(
-		uintptr(wsBorder),
+		uintptr(wsExClientEdge),
 		uintptr(unsafe.Pointer(editClass)), uintptr(unsafe.Pointer(initialPtr)),
-		uintptr(wsChild|wsVisible|wsTabStop|esAutoHScroll),
+		uintptr(wsChild|wsVisible|wsTabStop|esAutoHScroll|wsBorder),
 		20, 40, 380, 24,
 		hwnd, 0, hInstance, 0,
 	)
@@ -216,7 +225,7 @@ func InputBox(title, prompt, initial string) (string, bool) {
 			// the outer Run loop still observes it and the application
 			// actually exits, instead of this loop silently swallowing it.
 			procDestroyWindow.Call(hwnd)
-			procPostQuitMessage.Call(0)
+			procPostQuitMessage.Call(msg.WParam)
 			return "", false
 		}
 		if handled, _, _ := procIsDialogMessageW.Call(hwnd, uintptr(unsafe.Pointer(&msg))); handled == 0 {

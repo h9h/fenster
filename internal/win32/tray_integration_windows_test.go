@@ -56,14 +56,49 @@ func TestTrayMenuSmoke(t *testing.T) {
 	}
 	menu.AddItem(1, "Checked item", true, false)
 	menu.AddItem(2, "Greyed item", false, true)
+	menu.AddItem(3, "Plain item", false, false)
 	menu.AddSeparator()
 	menu.AddSubmenu("Submenu", sub, false)
 
-	if count, _, _ := procGetMenuItemCount.Call(menu.handle); int32(count) != 4 {
-		t.Fatalf("menu item count = %d, want 4 (item, item, separator, submenu)", int32(count))
+	if count, _, _ := procGetMenuItemCount.Call(menu.handle); int32(count) != 5 {
+		t.Fatalf("menu item count = %d, want 5 (item, item, item, separator, submenu)", int32(count))
 	}
 	if len(menu.subs) != 1 || menu.subs[0] != sub {
 		t.Fatalf("menu.subs = %v, want [sub]", menu.subs)
+	}
+
+	// Regression coverage for AddItem's checked/greyed flag composition:
+	// GetMenuState surfaces the actual MF_CHECKED/MF_GRAYED bits Windows
+	// recorded for each item, so this fails if AddItem ever swaps or drops
+	// either flag. A plain item with neither flag is included so the test
+	// also catches a bug that spuriously sets state on unrelated items.
+	menuState := func(id uint32) int32 {
+		state, _, _ := procGetMenuState.Call(menu.handle, uintptr(id), uintptr(mfByCommand))
+		if int32(state) == -1 {
+			t.Fatalf("GetMenuState(id=%d): item not found", id)
+		}
+		return int32(state)
+	}
+
+	checkedState := menuState(1)
+	if checkedState&mfChecked == 0 {
+		t.Errorf("item 1 (checked): MF_CHECKED not set, state = 0x%x", checkedState)
+	}
+	if checkedState&mfGrayed != 0 {
+		t.Errorf("item 1 (checked): MF_GRAYED unexpectedly set, state = 0x%x", checkedState)
+	}
+
+	greyedState := menuState(2)
+	if greyedState&mfGrayed == 0 {
+		t.Errorf("item 2 (greyed): MF_GRAYED not set, state = 0x%x", greyedState)
+	}
+	if greyedState&mfChecked != 0 {
+		t.Errorf("item 2 (greyed): MF_CHECKED unexpectedly set, state = 0x%x", greyedState)
+	}
+
+	plainState := menuState(3)
+	if plainState&(mfChecked|mfGrayed) != 0 {
+		t.Errorf("item 3 (plain): expected neither MF_CHECKED nor MF_GRAYED, state = 0x%x", plainState)
 	}
 
 	menu.Destroy()

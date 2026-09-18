@@ -79,9 +79,16 @@ var (
 	procSetFocus         = user32.NewProc("SetFocus")
 	procGetStockObject   = gdi32.NewProc("GetStockObject")
 
+	// Fix round 1: window classes need a real cursor and background brush,
+	// or a human tester sees no I-beam/arrow feedback and background paint
+	// artifacts on the dialog.
+	procLoadCursorW = user32.NewProc("LoadCursorW")
+
 	// Test-only: used by the win32integration smoke test to assert that
-	// Menu.AddItem/AddSeparator/AddSubmenu actually appended items.
+	// Menu.AddItem/AddSeparator/AddSubmenu actually appended items and set
+	// the expected checked/greyed state.
 	procGetMenuItemCount = user32.NewProc("GetMenuItemCount")
+	procGetMenuState     = user32.NewProc("GetMenuState")
 )
 
 // Window styles, show commands and flags used by this package.
@@ -148,6 +155,7 @@ const (
 	mfChecked      = 0x00000008
 	mfGrayed       = 0x00000001
 	mfPopup        = 0x00000010
+	mfByCommand    = 0x00000000 // GetMenuState's uFlags: look up by item id
 	tpmRightButton = 0x0002
 	tpmReturnCmd   = 0x0100
 
@@ -175,6 +183,15 @@ const (
 	esAutoHScroll   = 0x00000080
 	bsDefPushButton = 0x00000001
 
+	// wsExClientEdge (WS_EX_CLIENTEDGE) is an *extended* style
+	// (CreateWindowExW's first argument), unlike wsBorder above (a plain
+	// dwStyle bit): fix round 1 found the edit control had passed wsBorder
+	// into the dwExStyle slot by mistake, which set a reserved WS_EX_ bit
+	// instead of drawing a border. wsExClientEdge is used instead, for the
+	// conventional sunken edit-box look; wsBorder stays available for
+	// dwStyle use.
+	wsExClientEdge = 0x00000200
+
 	// GetSystemMetrics indices used to center the InputBox window.
 	smCxScreen = 0
 	smCyScreen = 1
@@ -182,6 +199,14 @@ const (
 	// GetStockObject argument used to give InputBox's controls a readable
 	// font instead of the default bitmap font.
 	defaultGuiFont = 17
+
+	// LoadCursorW/window-class background brush constants (fix round 1
+	// minor): idcArrow is IDC_ARROW as a MAKEINTRESOURCE id; colorBtnFace+1
+	// is passed directly as HbrBackground, which is how WNDCLASSEXW expects
+	// a system color to be given instead of an actual brush handle (see the
+	// CbSize comment on wndClassEx / the Win32 docs for WNDCLASSEX.hbrBackground).
+	idcArrow     = 32512
+	colorBtnFace = 15
 )
 
 type rect struct{ Left, Top, Right, Bottom int32 }

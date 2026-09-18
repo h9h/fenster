@@ -102,10 +102,13 @@ func NewMessageWindow(className string, onTrayClick func()) (*MessageWindow, err
 		return nil, fmt.Errorf("class name: %w", err)
 	}
 
+	hCursor, _, _ := procLoadCursorW.Call(0, uintptr(idcArrow))
 	wc := wndClassEx{
 		CbSize:        uint32(unsafe.Sizeof(wndClassEx{})),
 		LpfnWndProc:   messageWindowProc,
 		HInstance:     hInstance,
+		HCursor:       hCursor,
+		HbrBackground: uintptr(colorBtnFace + 1),
 		LpszClassName: classPtr,
 	}
 	if atom, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 {
