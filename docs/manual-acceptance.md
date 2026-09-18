@@ -71,6 +71,19 @@ Then start `.\fenster.exe` and work through the list below.
    state, change it, then restore. The window keeps its always-on-top flag
    after restore.
 
+7a. **Snapped window round-trips at the right size.** Snap a window to a
+    third or half of the screen (Win+Left/Right, or drag it into a Snap
+    Layout region), save a layout including it, move/resize the window
+    elsewhere (or snap it differently), then restore the layout. The window
+    comes back at the size and position it actually had on screen while
+    snapped — not the larger, unsnapped size it had before it was ever
+    snapped. *Check*: `layouts.json` — that window's entry has both a `rect`
+    and a `screen` value, and they differ (whereas an ordinary, never-snapped
+    window's `rect` and `screen` are equal). Note the accepted limitation:
+    after restore, Windows does not treat the window as snapped again — its
+    former snap-neighbour will not resize if you resize the restored window,
+    even though it landed on the correct area of the screen.
+
 8. **Closed window shows as absent.** Close one of the applications captured
    in a layout. Reopen the tray menu: that window's entry in the layout's
    submenu is greyed out (disabled) and its label ends in

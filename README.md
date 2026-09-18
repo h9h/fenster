@@ -82,6 +82,40 @@ Each layout row expands into a submenu:
 - **"Umbenennen…"** opens the input dialog prefilled with the current name.
 - **"Löschen"** asks for confirmation, then removes the layout.
 
+## Snapped windows
+
+Every saved window entry stores two rectangles, not one:
+
+- The **restored rectangle** — `WINDOWPLACEMENT.rcNormalPosition` — the size
+  and position the window returns to when it is neither minimized nor
+  maximized.
+- The **screen rectangle** — `GetWindowRect` — what the window actually
+  occupies on screen at save time.
+
+For an ordinary window the two are identical. They diverge for a window
+snapped with Windows Snap (Win+arrow, or Snap Layouts): Windows deliberately
+keeps `rcNormalPosition` as the *pre-snap* rectangle, so that dragging a
+snapped window away from its snap zone restores it to its former size —
+while `showCmd` still reads `SW_SHOWNORMAL`. Capturing only the restored
+rectangle, as an earlier version of fenster did, therefore restored a
+snapped window at the size and position it had *before* it was snapped, not
+where it visibly was. fenster now saves both and, on restore, positions a
+normal-state window at the screen rectangle when one was captured, falling
+back to the restored rectangle for layouts saved before this existed or for
+a window whose screen rectangle could not be read. Minimized and maximized
+windows are unaffected and always use the restored rectangle, since a
+minimized window's screen rectangle is the meaningless off-screen
+`(-32000, -32000)` Windows reports for any minimized window.
+
+**Known limitation:** Windows has no public API to put a window back into a
+snap *group*. A restored window lands on the correct area of the screen, but
+Windows does not consider it snapped afterwards — its neighbours will not
+resize if the restored window is resized or moved again, the way real
+snap-group members do. fenster does not attempt to work around this (in
+particular, it does not synthesize Win+arrow keystrokes); getting the
+geometry right on restore is the fix, re-establishing snap-group membership
+is not something a normal application can do.
+
 ## Monitor fingerprint
 
 A layout is tagged with a fingerprint of the monitor arrangement it was
