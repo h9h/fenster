@@ -55,7 +55,16 @@ type WindowEntry struct {
 	Class   string `json:"class"`
 	Title   string `json:"title"`
 	Ordinal int    `json:"ordinal"` // n-th window of Exe at save time
-	Rect    Rect   `json:"rect"`    // restored rectangle (WINDOWPLACEMENT.rcNormalPosition), even when maximized
+	// Rect is the restored rectangle (WINDOWPLACEMENT.rcNormalPosition), even
+	// when maximized. It is load-bearing for a minimized or maximized entry,
+	// and for any entry from a layout saved before Screen existed. For a
+	// normal-state entry that also has a valid Screen, Rect is still carried
+	// (and still applied to rcNormalPosition first) but has no observable
+	// effect after restore: the trailing SetWindowPos that positions the
+	// window at Screen resyncs rcNormalPosition to Screen as well, so nothing
+	// about the window's on-screen behaviour afterwards depends on Rect's
+	// value in that case.
+	Rect Rect `json:"rect"`
 	// Screen is what the window actually occupied on screen (GetWindowRect)
 	// at save time. For most windows this equals Rect. A window snapped via
 	// Windows Snap (Win+arrow, Snap Layouts) is the exception: Windows keeps

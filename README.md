@@ -116,6 +116,16 @@ particular, it does not synthesize Win+arrow keystrokes); getting the
 geometry right on restore is the fix, re-establishing snap-group membership
 is not something a normal application can do.
 
+**A second, separate consequence:** the "drag away to get your old size
+back" behaviour described above for a native snap does not survive a
+fenster restore either. Positioning the window at the screen rectangle
+resyncs `rcNormalPosition` to that same rectangle, so the restored window
+has no remembered pre-snap size left to return to — dragging it away from
+the screen area it was restored to just keeps it at that size, not its
+original pre-snap one. The next time this layout is saved or overwritten,
+`Rect` and `Screen` are captured equal to each other, so the original
+pre-snap size is gone for good after one restore cycle.
+
 ## Monitor fingerprint
 
 A layout is tagged with a fingerprint of the monitor arrangement it was

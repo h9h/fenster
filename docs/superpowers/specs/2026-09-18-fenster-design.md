@@ -145,6 +145,16 @@ real snap-group members do. This is accepted as out of scope; in particular,
 synthesizing Win+arrow keystrokes to re-invoke Windows' own snap engine is
 deliberately not attempted.
 
+**A second, separate limitation:** restoring does not preserve the native
+"drag away to recover the pre-snap size" behaviour either. The trailing
+`SetWindowPos` in the restore algorithm (step 4 above) resyncs
+`rcNormalPosition` to `screen`, so immediately after restore the window's
+own remembered "normal" rectangle is `screen`, not the original `rect` —
+there is no pre-snap size left for Windows to fall back to if the user
+drags the restored window away. The next capture or overwrite of that
+window accordingly records `rect == screen`, so the original pre-snap
+rectangle is lost for good after one restore cycle.
+
 ## Monitor setup fingerprint
 
 Matching is **loose and geometry-only**: device names, adapter IDs and
