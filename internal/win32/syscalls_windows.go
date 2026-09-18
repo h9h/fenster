@@ -171,7 +171,7 @@ const (
 	idiApplication = 32512
 
 	// Window styles and control styles used by dialog_windows.go's InputBox.
-	// wsOverlapped/wsCaption/wsSysMenu/wsChild/wsTabStop/wsBorder are plain
+	// wsOverlapped/wsCaption/wsSysMenu/wsChild/wsTabStop are plain
 	// (non-negative) style bits; wsVisible above is reused for both the
 	// dialog window and its controls.
 	wsOverlapped    = 0x00000000
@@ -179,17 +179,18 @@ const (
 	wsSysMenu       = 0x00080000
 	wsChild         = 0x40000000
 	wsTabStop       = 0x00010000
-	wsBorder        = 0x00800000
 	esAutoHScroll   = 0x00000080
 	bsDefPushButton = 0x00000001
 
 	// wsExClientEdge (WS_EX_CLIENTEDGE) is an *extended* style
-	// (CreateWindowExW's first argument), unlike wsBorder above (a plain
-	// dwStyle bit): fix round 1 found the edit control had passed wsBorder
-	// into the dwExStyle slot by mistake, which set a reserved WS_EX_ bit
-	// instead of drawing a border. wsExClientEdge is used instead, for the
-	// conventional sunken edit-box look; wsBorder stays available for
-	// dwStyle use.
+	// (CreateWindowExW's first argument). Fix round 1 found the edit control
+	// had passed WS_BORDER (a plain dwStyle bit, not an extended style) into
+	// the dwExStyle slot by mistake, which set a reserved WS_EX_ bit instead
+	// of drawing a border. wsExClientEdge is used instead, alone, for the
+	// conventional single sunken edit-box edge; there is no wsBorder
+	// constant, since combining WS_BORDER with WS_EX_CLIENTEDGE would only
+	// draw a redundant second, flat border, and nothing else in this
+	// package needs it.
 	wsExClientEdge = 0x00000200
 
 	// GetSystemMetrics indices used to center the InputBox window.

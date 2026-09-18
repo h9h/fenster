@@ -175,14 +175,15 @@ func InputBox(title, prompt, initial string) (string, bool) {
 	// CreateWindowExW's first argument is dwExStyle, not dwStyle. Fix round 1
 	// caught this control passing wsBorder (a dwStyle bit, WS_BORDER) into
 	// that dwExStyle slot: the border never rendered, and a reserved WS_EX_
-	// bit was set instead. wsBorder now lives in the dwStyle OR-list below,
-	// and wsExClientEdge (WS_EX_CLIENTEDGE) is passed as the real extended
-	// style, giving the conventional sunken edit-box look.
+	// bit was set instead. The fix uses wsExClientEdge (WS_EX_CLIENTEDGE) in
+	// the dwExStyle slot alone, giving the conventional single sunken
+	// edit-box edge; WS_BORDER is not also added to dwStyle, since combining
+	// both draws a redundant second, flat border around the sunken one.
 	initialPtr, _ := syscall.UTF16PtrFromString(initial)
 	editHwnd, _, _ := procCreateWindowExW.Call(
 		uintptr(wsExClientEdge),
 		uintptr(unsafe.Pointer(editClass)), uintptr(unsafe.Pointer(initialPtr)),
-		uintptr(wsChild|wsVisible|wsTabStop|esAutoHScroll|wsBorder),
+		uintptr(wsChild|wsVisible|wsTabStop|esAutoHScroll),
 		20, 40, 380, 24,
 		hwnd, 0, hInstance, 0,
 	)
