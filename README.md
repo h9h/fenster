@@ -1,0 +1,170 @@
+# fenster
+
+A Windows tray application that saves and restores window layouts — the
+position, size, show state (normal/minimized/maximized) and always-on-top
+flag of your open windows — and offers only the layouts that match the
+monitor setup you are currently on.
+
+It is for anyone who regularly reconnects a laptop to different docks or
+monitor arrangements and is tired of manually re-arranging windows every
+time.
+
+## Building and running
+
+Requirements: Go 1.22+, Windows. No third-party modules — `go.mod` declares
+no dependencies beyond the standard library, and this is deliberate: the
+program runs unattended in the background with access to every open window,
+the registry and the file system, so keeping its entire code auditable
+without pulling in supply-chain risk from arbitrary packages was treated as
+a hard constraint throughout.
+
+```
+go build -ldflags="-H=windowsgui -s -w" -o fenster.exe ./cmd/fenster
+```
+
+`-H=windowsgui` suppresses the console window; `-s -w` strip debug info for a
+smaller binary. Run the resulting `fenster.exe` directly; it adds itself to
+the notification area and has no window of its own.
+
+Only one instance runs at a time — starting a second copy shows
+`fenster läuft bereits.` and exits.
+
+## Where data lives
+
+Everything is under `%APPDATA%\fenster\`:
+
+- `layouts.json` — the saved layouts. Written atomically (temp file +
+  rename), so a crash mid-write cannot leave a half-written file in place.
+- `fenster.log` — plain-text log. The build has no console
+  (`-H=windowsgui`), so this file is the only place errors are visible; every
+  failure path either logs, shows a balloon, or both.
+- `fenster.ico` — the tray icon, extracted from the binary's embedded icon on
+  first run if not already present. If it cannot be loaded, fenster falls
+  back to a stock Windows icon rather than failing to start.
+
+## The tray menu
+
+Both left- and right-click open the same menu. Its structure, top to bottom:
+
+- **"Aktuelles Layout speichern…"** — opens an input dialog prefilled with a
+  suggested name (derived from the monitor setup and the current time),
+  captures every eligible open window, and adds a new top-level layout.
+- One row per saved layout that matches the **current** monitor setup. If
+  none match, a disabled placeholder reads
+  "Noch keine Layouts für dieses Setup".
+- **"Andere Setups"** — a submenu holding every layout saved under a
+  *different* monitor setup than the current one.
+- **"Mit Windows starten"** — checked when fenster is registered to start at
+  logon (see Autostart below).
+- **"Speicherort öffnen"** — opens Explorer with `layouts.json` selected (or
+  its folder, if the file does not exist yet).
+- **"Beenden"** — removes the tray icon and exits.
+
+Each layout row expands into a submenu:
+
+- **"Alle wiederherstellen"** restores every included window of that layout.
+  This is the row's own restore action, placed as the first submenu entry
+  rather than on the row itself, because a Win32 popup menu item that owns a
+  submenu cannot also fire a command — clicking it always opens the submenu.
+  There is no way to make the parent row itself clickable.
+- One entry per saved window, each with a persisted checkbox (see below), and
+  greyed out with the suffix `(nicht offen)` when that window is not
+  currently open (see Window matching below).
+- **"Mit aktuellem Stand überschreiben"** replaces the layout's saved windows
+  with the current live set, keeping the same name and id.
+- **"Umbenennen…"** opens the input dialog prefilled with the current name.
+- **"Löschen"** asks for confirmation, then removes the layout.
+
+## Monitor fingerprint
+
+A layout is tagged with a fingerprint of the monitor arrangement it was
+captured on: each monitor's resolution, its position relative to the primary
+monitor, and its DPI scaling percentage. Monitors are sorted into a
+canonical order first, so the fingerprint does not depend on enumeration
+order.
+
+Deliberately **not** part of the fingerprint: which physical monitor it is —
+no device name, adapter id, or serial number is used. Two consequences follow
+directly from that:
+
+- Replacing a monitor with an identical (or geometry-identical) model keeps
+  every layout saved for that setup working, because nothing about the old
+  monitor's identity was ever recorded.
+- Two different docking stations, or two different desks, that happen to
+  produce the same monitor count, resolutions, relative positions and DPI
+  scaling are indistinguishable to fenster and will share the same layouts.
+
+## Window matching
+
+When restoring, each saved window entry is matched to a currently open
+window of the same executable in three passes, applied in order over
+whatever is still unmatched after the previous pass:
+
+1. **Exact title match.**
+2. **Similar title match** — titles are normalized (case, whitespace, common
+   modification markers, an app-name suffix) and compared with a
+   normalized Levenshtein similarity; the closest match above a fixed
+   threshold wins. This tolerates the everyday churn of titles that include a
+   document name, a URL, or an "unsaved changes" marker.
+3. **N-th window of the same executable**, by the order the entry and the
+   live windows were originally enumerated in — this is the fallback for
+   windows whose titles no longer resemble the saved one at all.
+
+A live window is only ever claimed by one saved entry. An entry that finds no
+candidate in any pass is reported as missing; in the menu, its row is greyed
+out (disabled) and suffixed `(nicht offen)`, and restoring counts it as
+skipped rather than failed.
+
+## Persisted checkmarks
+
+Unticking a window in a layout's submenu writes that choice straight to
+`layouts.json` — it is not a transient, per-restore selection that resets
+the next time you open the menu. This follows directly from how a Win32
+popup menu works: it closes after every single click, so there is no way to
+tick several boxes and *then* confirm in one sitting. Persisting the
+checkbox is what makes toggling several windows off, one click at a time,
+actually usable — the menu reopens immediately after each toggle instead of
+staying closed, but the state itself lives in the file, not in memory.
+
+## Autostart
+
+"Mit Windows starten" toggles a `REG_SZ` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value name `fenster`,
+pointing at the current executable's full path in quotes. Unticking it
+deletes the value. No third-party install mechanism, scheduled task, or
+service is used.
+
+## Corrupted data recovery
+
+If `layouts.json` fails to parse on startup, it is renamed to
+`layouts.json.broken-<timestamp>` (the original content is preserved, not
+lost), fenster starts with an empty layout list, and a balloon names the
+renamed file. A file written by a newer schema version than this build
+understands is left untouched and startup fails with an explicit error
+instead of guessing at its structure.
+
+## Logging
+
+All log output goes to `%APPDATA%\fenster\fenster.log`. Nothing is printed to
+a console — there isn't one, by design (`-H=windowsgui`) — so this file, plus
+the balloons shown for user-facing failures, is the only diagnostic surface.
+
+## Testing
+
+```
+go vet ./...
+go test ./...
+go test -tags win32integration ./internal/win32/ -v
+```
+
+The first two run everywhere and cover the pure domain logic (window
+matching, off-screen clamping, the monitor fingerprint, the menu data model,
+the store's load/save/corruption handling) without needing a desktop. The
+`win32integration` tag additionally exercises real Win32 calls — window
+enumeration, monitor enumeration, moving an actual window, building a real
+menu — and therefore only runs on Windows with a graphical session.
+
+Everything that needs live human interaction with the tray icon, the popup
+menu and the input dialog (there is no automated UI-driving test for those)
+is covered instead by the manual checklist in
+[`docs/manual-acceptance.md`](docs/manual-acceptance.md).

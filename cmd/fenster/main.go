@@ -138,19 +138,30 @@ func (a *application) notify(text string) {
 	}
 }
 
-// onTrayClick builds and shows the tray menu, then dispatches whatever the
-// user chose. It is also called recursively by actionToggleInclude to reopen
-// the menu after a checkbox toggle.
+// onTrayClick builds and shows the tray menu, dispatches whatever the user
+// chose, and — instead of recursing — loops to reopen the menu as long as the
+// dispatched action asks for it (currently only a checkbox toggle does, so
+// the user can keep ticking windows without the menu closing between
+// clicks). Each iteration is an independent menu build, since the set of
+// live windows and monitors may have changed while the previous menu was
+// open.
 func (a *application) onTrayClick() {
+	for a.showMenuOnce() {
+	}
+}
+
+// showMenuOnce builds and shows the tray menu once, dispatches the chosen
+// action, and reports whether the menu should be reopened immediately.
+func (a *application) showMenuOnce() (reopen bool) {
 	infos, err := win32.EnumWindowsInfo()
 	if err != nil {
 		a.reportError("Fenster konnten nicht ermittelt werden", err)
-		return
+		return false
 	}
 	mons, err := win32.EnumMonitors()
 	if err != nil {
 		a.reportError("Monitore konnten nicht ermittelt werden", err)
-		return
+		return false
 	}
 
 	live := toLive(infos)
@@ -172,24 +183,25 @@ func (a *application) onTrayClick() {
 	menu.Destroy()
 
 	if id == 0 {
-		return
+		return false
 	}
 	action, ok := actions[id]
 	if !ok {
-		return
+		return false
 	}
-	a.dispatch(action, mons, live)
+	return a.dispatch(action, mons, live)
 }
 
-// dispatch runs the command behind one chosen menu action.
-func (a *application) dispatch(action tray.Action, mons []store.Monitor, live []layout.Live) {
+// dispatch runs the command behind one chosen menu action and reports
+// whether the menu should be reopened immediately afterwards.
+func (a *application) dispatch(action tray.Action, mons []store.Monitor, live []layout.Live) (reopen bool) {
 	switch action.Type {
 	case tray.ActionSave:
 		a.actionSave(mons, live)
 	case tray.ActionRestore:
 		a.actionRestore(action.LayoutID, mons, live)
 	case tray.ActionToggleInclude:
-		a.actionToggleInclude(action.LayoutID, action.WindowIdx)
+		return a.actionToggleInclude(action.LayoutID, action.WindowIdx)
 	case tray.ActionOverwrite:
 		a.actionOverwrite(action.LayoutID, mons, live)
 	case tray.ActionRename:
@@ -202,7 +214,13 @@ func (a *application) dispatch(action tray.Action, mons []store.Monitor, live []
 		a.actionOpenFolder()
 	case tray.ActionQuit:
 		a.actionQuit()
+	default:
+		// Should be unreachable: every tray.ActionType is handled above. Log
+		// rather than silently no-op, so a future action type added to the
+		// model without a matching case here does not vanish without a trace.
+		log.Printf("dispatch: unhandled action type %v", action.Type)
 	}
+	return false
 }
 
 func (a *application) actionSave(mons []store.Monitor, live []layout.Live) {
@@ -232,7 +250,9 @@ func (a *application) actionSave(mons []store.Monitor, live []layout.Live) {
 	if err := a.store.Save(); err != nil {
 		// Roll back so the in-memory store stays consistent with what is
 		// actually on disk.
-		a.store.Delete(l.ID)
+		if rbErr := a.store.Delete(l.ID); rbErr != nil {
+			log.Printf("rollback add %q after failed save: %v", l.ID, rbErr)
+		}
 		a.reportError("Layout konnte nicht gespeichert werden", err)
 		return
 	}
@@ -267,30 +287,34 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 	a.notify(restoreMessage(restored, skipped, failed))
 }
 
-func (a *application) actionToggleInclude(id string, windowIdx int) {
+// actionToggleInclude flips one window's persisted checkbox and reports
+// whether the menu should be reopened so the user can continue toggling.
+func (a *application) actionToggleInclude(id string, windowIdx int) bool {
 	l, ok := a.store.Get(id)
 	if !ok {
 		a.reportError("Fenster konnte nicht geändert werden", fmt.Errorf("Layout %q nicht gefunden", id))
-		return
+		return false
 	}
 	if windowIdx < 0 || windowIdx >= len(l.Windows) {
 		a.reportError("Fenster konnte nicht geändert werden", fmt.Errorf("ungültiger Fensterindex %d", windowIdx))
-		return
+		return false
 	}
 	current := l.Windows[windowIdx].Include
 
 	if err := a.store.SetInclude(id, windowIdx, !current); err != nil {
 		a.reportError("Fenster konnte nicht geändert werden", err)
-		return
+		return false
 	}
 	if err := a.store.Save(); err != nil {
-		a.store.SetInclude(id, windowIdx, current) // roll back
+		if rbErr := a.store.SetInclude(id, windowIdx, current); rbErr != nil { // roll back
+			log.Printf("rollback SetInclude %q[%d] after failed save: %v", id, windowIdx, rbErr)
+		}
 		a.reportError("Änderung konnte nicht gespeichert werden", err)
-		return
+		return false
 	}
 
-	// Reopen the menu so the user can continue toggling.
-	a.onTrayClick()
+	// Ask the caller to reopen the menu so the user can continue toggling.
+	return true
 }
 
 func (a *application) actionOverwrite(id string, mons []store.Monitor, live []layout.Live) {
@@ -310,7 +334,9 @@ func (a *application) actionOverwrite(id string, mons []store.Monitor, live []la
 		return
 	}
 	if err := a.store.Save(); err != nil {
-		a.store.Replace(id, old) // roll back
+		if rbErr := a.store.Replace(id, old); rbErr != nil { // roll back
+			log.Printf("rollback overwrite %q after failed save: %v", id, rbErr)
+		}
 		a.reportError("Überschreiben fehlgeschlagen", err)
 		return
 	}
@@ -342,7 +368,9 @@ func (a *application) actionRename(id string) {
 		return
 	}
 	if err := a.store.Save(); err != nil {
-		a.store.Replace(id, old) // roll back
+		if rbErr := a.store.Replace(id, old); rbErr != nil { // roll back
+			log.Printf("rollback rename %q after failed save: %v", id, rbErr)
+		}
 		a.reportError("Umbenennen fehlgeschlagen", err)
 		return
 	}
@@ -387,7 +415,12 @@ func (a *application) restoreOrder(order []store.Layout) {
 		currentIDs = append(currentIDs, l.ID)
 	}
 	for _, id := range currentIDs {
-		a.store.Delete(id)
+		if err := a.store.Delete(id); err != nil {
+			// A double fault: the delete rollback itself failed. Logging is
+			// the only way this is ever visible, since there is no further
+			// rollback to fall back to.
+			log.Printf("restoreOrder: deleting %q: %v", id, err)
+		}
 	}
 	for _, l := range order {
 		a.store.Add(l)
