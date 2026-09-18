@@ -68,6 +68,14 @@ func normalize(ms []store.Monitor) []store.Monitor {
 	out := make([]store.Monitor, len(ms))
 	copy(out, ms)
 
+	// A total order: every field that can differ between two monitors is
+	// compared, ending in Primary, so no two distinct monitors can ever tie.
+	// sort.Slice is not stable, so leaving any tie possible (e.g. two
+	// monitors sharing Y, X and W but differing only in H, as the old
+	// three-key comparator did) let the canonical string — and therefore the
+	// fingerprint — come out differently between runs on identical
+	// hardware, silently breaking layout matching with nothing in the UI to
+	// explain it.
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Y != out[j].Y {
 			return out[i].Y < out[j].Y
@@ -75,7 +83,18 @@ func normalize(ms []store.Monitor) []store.Monitor {
 		if out[i].X != out[j].X {
 			return out[i].X < out[j].X
 		}
-		return out[i].W < out[j].W
+		if out[i].W != out[j].W {
+			return out[i].W < out[j].W
+		}
+		if out[i].H != out[j].H {
+			return out[i].H < out[j].H
+		}
+		if out[i].Scale != out[j].Scale {
+			return out[i].Scale < out[j].Scale
+		}
+		// false < true, so a non-primary monitor sorts before a primary one
+		// in the (only realistic) case that everything else still ties.
+		return !out[i].Primary && out[j].Primary
 	})
 
 	var originX, originY int32

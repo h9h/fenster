@@ -13,6 +13,7 @@ import (
 // dialogState carries one InputBox invocation's mutable result across its
 // window procedure and its local message loop.
 type dialogState struct {
+	hwnd     uintptr
 	editHwnd uintptr
 	text     string
 	ok       bool
@@ -150,14 +151,35 @@ func InputBox(title, prompt, initial string) (string, bool) {
 		return "", false
 	}
 
-	st := &dialogState{}
+	st := &dialogState{hwnd: hwnd}
 	dialogMu.Lock()
+	prev := dialogCurrent
 	dialogCurrent = st
 	dialogMu.Unlock()
+
+	// A nested InputBox call — one opened while another is already showing,
+	// e.g. because a tray click slipped past onTrayClick's re-entrancy guard
+	// through some path other than the tray icon itself — used to be
+	// resolved by nilling dialogCurrent when the inner call's defer ran,
+	// which corrupted the outer call: its window proc would find
+	// dialogCurrent nil on the next click, so OK/Cancel silently did nothing
+	// and the outer loop never terminated. Saving and restoring the previous
+	// state here instead means the outer dialog's window proc keeps working
+	// once the inner one closes. procEnableWindow disables the outer
+	// dialog's window for as long as the inner one is open, so the user
+	// cannot type into or dismiss a window that is not the one actually on
+	// top — the modality InputBox's window style never established on its
+	// own.
+	if prev != nil && prev.hwnd != 0 {
+		procEnableWindow.Call(prev.hwnd, 0)
+	}
 	defer func() {
 		dialogMu.Lock()
-		dialogCurrent = nil
+		dialogCurrent = prev
 		dialogMu.Unlock()
+		if prev != nil && prev.hwnd != 0 {
+			procEnableWindow.Call(prev.hwnd, 1)
+		}
 	}()
 
 	staticClass, _ := syscall.UTF16PtrFromString("STATIC")

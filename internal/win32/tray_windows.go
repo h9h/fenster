@@ -2,6 +2,7 @@ package win32
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -48,10 +49,34 @@ func putUTF16(dst []uint16, s string) {
 // tray icon callbacks and the WM_DESTROY that ends the application's message
 // loop.
 type MessageWindow struct {
-	hwnd        uintptr
-	hInstance   uintptr
-	classPtr    *uint16
-	onTrayClick func()
+	hwnd               uintptr
+	hInstance          uintptr
+	classPtr           *uint16
+	onTrayClick        func()
+	onTaskbarRecreated func()
+}
+
+// taskbarCreatedMsg is the id Windows assigns to the "TaskbarCreated"
+// message, registered once at package init (RegisterWindowMessageW always
+// returns the same id for the same string within a session, so registering
+// it eagerly here rather than lazily on first use changes nothing
+// observable). Explorer broadcasts this message to every top-level window
+// when it restarts — a Windows update, an Explorer crash, or a manual
+// restart all trigger it — and rebuilds the notification area from
+// scratch: every icon that was there before is gone until its owner calls
+// Shell_NotifyIconW(NIM_ADD) again. messageWindowProc watches for this id
+// and calls back into the owning MessageWindow's onTaskbarRecreated so that
+// re-add happens automatically instead of leaving the process running with
+// no visible icon and no way to reach it short of Task Manager.
+var taskbarCreatedMsg = registerTaskbarCreatedMsg()
+
+func registerTaskbarCreatedMsg() uintptr {
+	namePtr, err := syscall.UTF16PtrFromString("TaskbarCreated")
+	if err != nil {
+		return 0
+	}
+	ret, _, _ := procRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(namePtr)))
+	return ret
 }
 
 // msgWndMu guards msgWndState, which routes messages arriving at
@@ -68,6 +93,20 @@ var (
 )
 
 var messageWindowProc = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintptr) uintptr {
+	// taskbarCreatedMsg is a runtime-registered id, not a WM_ constant, so it
+	// is checked separately rather than as a switch case: if registration
+	// ever failed and left it 0, a bare `case 0:` in the switch below would
+	// wrongly fire on WM_NULL, which Menu.Track posts to this very window on
+	// every close.
+	if taskbarCreatedMsg != 0 && msg == taskbarCreatedMsg {
+		msgWndMu.Lock()
+		mw := msgWndState[hwnd]
+		msgWndMu.Unlock()
+		if mw != nil && mw.onTaskbarRecreated != nil {
+			mw.onTaskbarRecreated()
+		}
+		return 0
+	}
 	switch msg {
 	case wmTrayIcon:
 		if lparam == wmRightButtonUp || lparam == wmLeftButtonUp {
@@ -93,8 +132,12 @@ var messageWindowProc = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintp
 // NewMessageWindow registers className as a window class and creates a
 // never-shown top-level window of that class. onTrayClick is invoked (from
 // inside Run's DispatchMessageW, i.e. on the caller's own goroutine) whenever
-// the tray icon receives a left- or right-button-up click.
-func NewMessageWindow(className string, onTrayClick func()) (*MessageWindow, error) {
+// the tray icon receives a left- or right-button-up click. onTaskbarRecreated
+// is invoked the same way whenever Explorer restarts and rebuilds the
+// notification area (see taskbarCreatedMsg); it is the caller's job to
+// re-add its own tray icon there, since MessageWindow is created before the
+// TrayIcon that will need re-adding exists.
+func NewMessageWindow(className string, onTrayClick func(), onTaskbarRecreated func()) (*MessageWindow, error) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 
 	classPtr, err := syscall.UTF16PtrFromString(className)
@@ -134,7 +177,13 @@ func NewMessageWindow(className string, onTrayClick func()) (*MessageWindow, err
 		return nil, fmt.Errorf("CreateWindowExW: %w", err)
 	}
 
-	mw := &MessageWindow{hwnd: hwnd, hInstance: hInstance, classPtr: classPtr, onTrayClick: onTrayClick}
+	mw := &MessageWindow{
+		hwnd:               hwnd,
+		hInstance:          hInstance,
+		classPtr:           classPtr,
+		onTrayClick:        onTrayClick,
+		onTaskbarRecreated: onTaskbarRecreated,
+	}
 	msgWndMu.Lock()
 	msgWndState[hwnd] = mw
 	msgWndMu.Unlock()
@@ -168,6 +217,8 @@ func (mw *MessageWindow) Quit() {
 type TrayIcon struct {
 	hwnd uintptr
 	uid  uint32
+	icon uintptr
+	tip  string
 }
 
 // trayIconUID identifies the icon within its owning window. fenster shows
@@ -177,21 +228,40 @@ const trayIconUID uint32 = 1
 // NewTrayIcon adds a tray icon owned by hwnd. Clicks on it arrive at hwnd as
 // wmTrayIcon messages (see MessageWindow).
 func NewTrayIcon(hwnd uintptr, icon uintptr, tip string) (*TrayIcon, error) {
+	t := &TrayIcon{hwnd: hwnd, uid: trayIconUID, icon: icon, tip: tip}
+	if err := t.add(); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// add issues Shell_NotifyIconW(NIM_ADD) for this icon's current hwnd, uid,
+// icon and tip. Both NewTrayIcon and Readd (called after a TaskbarCreated
+// notification) go through this single place so they cannot drift apart.
+func (t *TrayIcon) add() error {
 	nid := notifyIconData{
 		CbSize:           uint32(unsafe.Sizeof(notifyIconData{})),
-		HWnd:             hwnd,
-		UID:              trayIconUID,
+		HWnd:             t.hwnd,
+		UID:              t.uid,
 		UFlags:           nifMessage | nifIcon | nifTip,
 		UCallbackMessage: uint32(wmTrayIcon),
-		HIcon:            icon,
+		HIcon:            t.icon,
 	}
-	putUTF16(nid.SzTip[:], tip)
+	putUTF16(nid.SzTip[:], t.tip)
 
 	ret, _, err := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid)))
 	if ret == 0 {
-		return nil, fmt.Errorf("Shell_NotifyIconW(NIM_ADD): %w", err)
+		return fmt.Errorf("Shell_NotifyIconW(NIM_ADD): %w", err)
 	}
-	return &TrayIcon{hwnd: hwnd, uid: trayIconUID}, nil
+	return nil
+}
+
+// Readd re-issues NIM_ADD for this icon with its original icon handle and
+// tip. Call it after a TaskbarCreated notification: Explorer has thrown away
+// every icon in the notification area and this is the only way to get it
+// back without restarting the process.
+func (t *TrayIcon) Readd() error {
+	return t.add()
 }
 
 // Balloon shows a Windows notification balloon from the tray icon.
@@ -259,6 +329,14 @@ func NewMenu() *Menu {
 	return &Menu{handle: h}
 }
 
+// escapeMenuAmpersand doubles "&" so a literal ampersand in a label (e.g. a
+// window titled "Tom & Jerry") renders as-is instead of Win32 interpreting a
+// single "&" as marking the following character as a keyboard accelerator,
+// which would render as "Tom Jerry" with a stray underline.
+func escapeMenuAmpersand(label string) string {
+	return strings.ReplaceAll(label, "&", "&&")
+}
+
 // AddItem appends a command item.
 func (m *Menu) AddItem(id uint32, label string, checked, disabled bool) {
 	flags := uintptr(mfString)
@@ -268,7 +346,7 @@ func (m *Menu) AddItem(id uint32, label string, checked, disabled bool) {
 	if disabled {
 		flags |= mfGrayed
 	}
-	labelPtr, err := syscall.UTF16PtrFromString(label)
+	labelPtr, err := syscall.UTF16PtrFromString(escapeMenuAmpersand(label))
 	if err != nil {
 		return
 	}
@@ -287,7 +365,7 @@ func (m *Menu) AddSubmenu(label string, sub *Menu, disabled bool) {
 	if disabled {
 		flags |= mfGrayed
 	}
-	labelPtr, err := syscall.UTF16PtrFromString(label)
+	labelPtr, err := syscall.UTF16PtrFromString(escapeMenuAmpersand(label))
 	if err != nil {
 		return
 	}
@@ -319,11 +397,14 @@ func (m *Menu) Track(hwnd uintptr) uint32 {
 	return uint32(ret)
 }
 
-// Destroy destroys the menu and all submenus attached via AddSubmenu.
+// Destroy destroys the menu and, transitively, every submenu attached via
+// AddSubmenu: DestroyMenu already recursively frees any popup menu it still
+// holds a handle to, so a separate loop calling sub.Destroy() first would
+// only ask USER32 to free handles it had already freed a moment earlier, on
+// every single menu open. m.subs is dropped here purely to release fenster's
+// own references to those *Menu wrappers, not because anything Win32-side
+// still needs it.
 func (m *Menu) Destroy() {
-	for _, sub := range m.subs {
-		sub.Destroy()
-	}
 	m.subs = nil
 	procDestroyMenu.Call(m.handle)
 }

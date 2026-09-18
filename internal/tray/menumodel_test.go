@@ -228,7 +228,7 @@ func TestMultipleLayoutsSharingFingerprintAreBothTopLevel(t *testing.T) {
 }
 
 func TestGlobalCommands(t *testing.T) {
-	items := BuildMenu(MenuInput{CurrentFingerprint: "aaaa1111", AutostartOn: true})
+	items := BuildMenu(MenuInput{CurrentFingerprint: "aaaa1111", AutostartOn: true, AutostartAvailable: true})
 
 	save, ok := find(items, "Aktuelles Layout speichern")
 	if !ok || save.Action.Type != ActionSave {
@@ -244,6 +244,49 @@ func TestGlobalCommands(t *testing.T) {
 	quit, ok := find(items, "Beenden")
 	if !ok || quit.Action.Type != ActionQuit {
 		t.Errorf("quit command missing or wrong: %+v", quit)
+	}
+	if hasAdjacentSeparators(items) {
+		t.Errorf("menu has adjacent separators: %+v", items)
+	}
+}
+
+func TestAutostartDisabledWhenExecutablePathUnavailable(t *testing.T) {
+	items := BuildMenu(MenuInput{CurrentFingerprint: "aaaa1111", AutostartOn: true, AutostartAvailable: false})
+
+	auto, ok := find(items, "Mit Windows starten")
+	if !ok {
+		t.Fatal("autostart command missing")
+	}
+	if !auto.Disabled {
+		t.Errorf("autostart item must be disabled when the executable path is unavailable: %+v", auto)
+	}
+	if auto.Checked {
+		t.Errorf("autostart item must not read as checked when the executable path is unavailable: %+v", auto)
+	}
+}
+
+func TestSeparatorPrecedesAndereSetups(t *testing.T) {
+	in := MenuInput{
+		Layouts: []store.Layout{
+			layoutFor("l1", "Docked", "aaaa1111", "alpha"),
+			layoutFor("l2", "Mobile", "bbbb2222", "beta"),
+		},
+		CurrentFingerprint: "aaaa1111",
+	}
+	items := BuildMenu(in)
+
+	idx := -1
+	for i, it := range items {
+		if it.Label == "Andere Setups" {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		t.Fatalf(`"Andere Setups" not found at a valid position: %+v`, items)
+	}
+	if !items[idx-1].Separator {
+		t.Errorf("expected a separator immediately before Andere Setups, got %+v", items[idx-1])
 	}
 	if hasAdjacentSeparators(items) {
 		t.Errorf("menu has adjacent separators: %+v", items)

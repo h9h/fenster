@@ -42,6 +42,13 @@ Everything is under `%APPDATA%\fenster\`:
   first run if not already present. If it cannot be loaded, fenster falls
   back to a stock Windows icon rather than failing to start.
 
+If Explorer restarts while fenster is running — a Windows update, an
+Explorer crash, or a manual restart all do this — it rebuilds the
+notification area from scratch and every icon that was there before is
+gone. fenster listens for the `TaskbarCreated` broadcast Explorer sends when
+this happens and re-adds its own icon automatically, so no single Explorer
+restart over weeks of uptime can strand the process with no visible icon.
+
 ## The tray menu
 
 Both left- and right-click open the same menu. Its structure, top to bottom:
@@ -113,7 +120,8 @@ whatever is still unmatched after the previous pass:
 A live window is only ever claimed by one saved entry. An entry that finds no
 candidate in any pass is reported as missing; in the menu, its row is greyed
 out (disabled) and suffixed `(nicht offen)`, and restoring counts it as
-skipped rather than failed.
+skipped rather than failed, reported in the balloon as
+`<n> übersprungen (nicht offen)`.
 
 ## Persisted checkmarks
 
@@ -126,13 +134,21 @@ checkbox is what makes toggling several windows off, one click at a time,
 actually usable — the menu reopens immediately after each toggle instead of
 staying closed, but the state itself lives in the file, not in memory.
 
+A window excluded this way is reported in the restore balloon as
+`<n> abgewählt`, distinct from `<n> übersprungen (nicht offen)`: one is a
+deliberate choice recorded by the user, the other means the window simply
+was not found running. Folding both into a single count would make
+deliberately unticking windows indistinguishable from them being closed.
+
 ## Autostart
 
 "Mit Windows starten" toggles a `REG_SZ` value under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value name `fenster`,
 pointing at the current executable's full path in quotes. Unticking it
 deletes the value. No third-party install mechanism, scheduled task, or
-service is used.
+service is used. If the running executable's own path could not be
+determined at startup, the menu item is greyed out instead of silently
+reading as unchecked and writing an empty value on click.
 
 ## Corrupted data recovery
 

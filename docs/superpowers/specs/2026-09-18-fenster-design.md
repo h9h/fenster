@@ -58,11 +58,20 @@ flowchart TD
 | `internal/monitors` | Monitor setup discovery and fingerprinting | `win32` (via interface) |
 | `internal/store` | Load, save, atomic write, corruption recovery | — |
 | `internal/tray` | Menu construction, click dispatch, notifications, dialogs | all |
-| `internal/autostart` | Read and toggle the HKCU Run entry | `win32` |
+| `internal/autostart` | Read and toggle the HKCU Run entry | — |
 
 `internal/layout` and `internal/monitors` receive their data through a
 `Desktop` interface (`Windows() []Window`, `Monitors() []Monitor`), so their
 logic is testable with fabricated data on any machine.
+
+`internal/autostart` is the one deliberate exception to `internal/win32`
+being the only package that touches the Windows API: `golang.org/x/sys`,
+which is where the standard registry package would come from, is
+unavailable under the no-third-party-modules constraint, and the four
+`advapi32` calls autostart needs (`RegOpenKeyExW`/`RegCreateKeyExW`/
+`RegSetValueExW`/`RegDeleteValueW`) are self-contained enough that routing
+them through `win32` would add an indirection with nothing shared to show
+for it. See the Autostart section below for the calls themselves.
 
 ## Data model
 

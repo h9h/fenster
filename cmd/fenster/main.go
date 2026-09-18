@@ -97,7 +97,7 @@ func main() {
 		exePath:   exePath,
 	}
 
-	msgWindow, err := win32.NewMessageWindow("fensterMessageWindow", app.onTrayClick)
+	msgWindow, err := win32.NewMessageWindow("fensterMessageWindow", app.onTrayClick, app.onTaskbarRecreated)
 	if err != nil {
 		win32.Alert("fenster", fmt.Sprintf("Anwendungsfenster konnte nicht erzeugt werden:\n%v", err))
 		return
@@ -128,13 +128,43 @@ type application struct {
 	exePath   string
 	msgWindow *win32.MessageWindow
 	trayIcon  *win32.TrayIcon
+
+	// busy is a re-entrancy guard for onTrayClick. InputBox's nested message
+	// loop pumps every message on the thread, including the tray icon's own
+	// wmTrayIcon, so a click on the tray icon while a dialog (or any other
+	// action) is already in progress would otherwise dispatch straight back
+	// into onTrayClick and open a second menu on top of the first — which,
+	// for InputBox specifically, orphaned the outer dialog outright. Setting
+	// this on entry and clearing it via defer makes such a re-entrant click
+	// a no-op instead.
+	busy bool
 }
 
 // notify shows a balloon and logs if even that fails, so that a balloon
-// failure is at least visible in the log rather than silently swallowed.
+// failure is at least visible in the log rather than silently swallowed. It
+// mirrors reportError's nil check on trayIcon: notify can run from inside a
+// syscall.NewCallback (via the tray click and window message plumbing),
+// where a Go panic terminates the whole process — which would remove the
+// tray icon, the one thing no failure is allowed to do.
 func (a *application) notify(text string) {
+	if a.trayIcon == nil {
+		return
+	}
 	if err := a.trayIcon.Balloon("fenster", text); err != nil {
 		log.Printf("Balloon: %v", err)
+	}
+}
+
+// onTaskbarRecreated re-adds the tray icon after Explorer rebuilds the
+// notification area (a Windows update, an Explorer crash, or a manual
+// restart all trigger this). Without it, fenster would keep running with no
+// visible icon and no way to reach it short of Task Manager.
+func (a *application) onTaskbarRecreated() {
+	if a.trayIcon == nil {
+		return
+	}
+	if err := a.trayIcon.Readd(); err != nil {
+		log.Printf("TrayIcon.Readd after TaskbarCreated: %v", err)
 	}
 }
 
@@ -146,6 +176,12 @@ func (a *application) notify(text string) {
 // live windows and monitors may have changed while the previous menu was
 // open.
 func (a *application) onTrayClick() {
+	if a.busy {
+		return
+	}
+	a.busy = true
+	defer func() { a.busy = false }()
+
 	for a.showMenuOnce() {
 	}
 }
@@ -167,9 +203,19 @@ func (a *application) showMenuOnce() (reopen bool) {
 	live := toLive(infos)
 	fingerprint := monitors.Fingerprint(mons)
 
-	autostartOn, err := autostart.Default().Enabled(a.exePath)
-	if err != nil {
-		log.Printf("autostart.Enabled: %v", err)
+	// A failed os.Executable() at startup leaves exePath empty; querying or
+	// toggling autostart with an empty path would always read back
+	// unchecked and, if toggled on, write an empty value into the registry.
+	// Skipping the query and marking the item unavailable instead keeps the
+	// menu honest about what it cannot do.
+	autostartAvailable := a.exePath != ""
+	var autostartOn bool
+	if autostartAvailable {
+		var err error
+		autostartOn, err = autostart.Default().Enabled(a.exePath)
+		if err != nil {
+			log.Printf("autostart.Enabled: %v", err)
+		}
 	}
 
 	items := tray.BuildMenu(tray.MenuInput{
@@ -177,6 +223,7 @@ func (a *application) showMenuOnce() (reopen bool) {
 		CurrentFingerprint: fingerprint,
 		Live:               live,
 		AutostartOn:        autostartOn,
+		AutostartAvailable: autostartAvailable,
 	})
 	menu, actions := tray.Render(items)
 	id := menu.Track(a.msgWindow.Handle())
@@ -268,10 +315,15 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 
 	plan := layout.MatchEntries(l.Windows, live)
 
-	restored, skipped, failed := 0, 0, 0
+	// deselected and missing are counted separately (I3): an entry excluded
+	// by an unticked checkbox is a deliberate user choice, not evidence that
+	// its window is not running, and lumping both into one "skipped" bucket
+	// made the balloon claim windows were "nicht offen" for windows the user
+	// had simply unticked.
+	restored, deselected, missing, failed := 0, 0, 0, 0
 	for _, m := range plan.Matches {
 		if !m.Entry.Include {
-			skipped++
+			deselected++
 			continue
 		}
 		rect := layout.Clamp(m.Entry.Rect, mons)
@@ -282,9 +334,9 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 		}
 		restored++
 	}
-	skipped += len(plan.Missing)
+	missing = len(plan.Missing)
 
-	a.notify(restoreMessage(restored, skipped, failed))
+	a.notify(restoreMessage(restored, deselected, missing, failed))
 }
 
 // actionToggleInclude flips one window's persisted checkbox and reports
@@ -428,6 +480,11 @@ func (a *application) restoreOrder(order []store.Layout) {
 }
 
 func (a *application) actionToggleAutostart() {
+	if a.exePath == "" {
+		a.reportError("Mit Windows starten", fmt.Errorf("Pfad der ausführbaren Datei konnte nicht ermittelt werden"))
+		return
+	}
+
 	entry := autostart.Default()
 	on, err := entry.Enabled(a.exePath)
 	if err != nil {

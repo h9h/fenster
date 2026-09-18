@@ -17,7 +17,7 @@ func TestTrayMenuSmoke(t *testing.T) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 
 	className := fmt.Sprintf("fensterTrayTest%d", uintptr(unsafe.Pointer(&hInstance)))
-	mw, err := NewMessageWindow(className, func() {})
+	mw, err := NewMessageWindow(className, func() {}, func() {})
 	if err != nil {
 		t.Fatalf("NewMessageWindow: %v", err)
 	}
@@ -57,11 +57,12 @@ func TestTrayMenuSmoke(t *testing.T) {
 	menu.AddItem(1, "Checked item", true, false)
 	menu.AddItem(2, "Greyed item", false, true)
 	menu.AddItem(3, "Plain item", false, false)
+	menu.AddItem(4, "Tom & Jerry", false, false)
 	menu.AddSeparator()
 	menu.AddSubmenu("Submenu", sub, false)
 
-	if count, _, _ := procGetMenuItemCount.Call(menu.handle); int32(count) != 5 {
-		t.Fatalf("menu item count = %d, want 5 (item, item, item, separator, submenu)", int32(count))
+	if count, _, _ := procGetMenuItemCount.Call(menu.handle); int32(count) != 6 {
+		t.Fatalf("menu item count = %d, want 6 (item, item, item, item, separator, submenu)", int32(count))
 	}
 	if len(menu.subs) != 1 || menu.subs[0] != sub {
 		t.Fatalf("menu.subs = %v, want [sub]", menu.subs)
@@ -101,6 +102,14 @@ func TestTrayMenuSmoke(t *testing.T) {
 		t.Errorf("item 3 (plain): expected neither MF_CHECKED nor MF_GRAYED, state = 0x%x", plainState)
 	}
 
+	// Regression coverage for AddItem escaping "&": a label like "Tom &
+	// Jerry" must render with a literal ampersand, not be interpreted by
+	// Win32 as marking the following character a keyboard accelerator
+	// (which would render as "Tom Jerry" with a stray underline).
+	if got, want := menuItemText(t, menu.handle, 4), "Tom && Jerry"; got != want {
+		t.Errorf("item 4 label = %q, want %q (ampersand not escaped)", got, want)
+	}
+
 	menu.Destroy()
 
 	classPtr, err := syscall.UTF16PtrFromString(className)
@@ -113,4 +122,19 @@ func TestTrayMenuSmoke(t *testing.T) {
 	if ret, _, err := procUnregisterClassW.Call(uintptr(unsafe.Pointer(classPtr)), hInstance); ret == 0 {
 		t.Fatalf("UnregisterClassW: %v", err)
 	}
+}
+
+// menuItemText reads back the raw label GetMenuStringW has stored for id,
+// exactly as AppendMenuW recorded it (Win32 only interprets a lone "&" as an
+// accelerator marker when painting the menu, not in what GetMenuStringW
+// returns), so this is how the test asserts that AddItem actually doubled
+// every "&" before handing the label to AppendMenuW.
+func menuItemText(t *testing.T, hmenu uintptr, id uint32) string {
+	t.Helper()
+	buf := make([]uint16, 256)
+	n, _, err := procGetMenuStringW.Call(hmenu, uintptr(id), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), uintptr(mfByCommand))
+	if n == 0 {
+		t.Fatalf("GetMenuStringW(id=%d): %v", id, err)
+	}
+	return syscall.UTF16ToString(buf[:n])
 }

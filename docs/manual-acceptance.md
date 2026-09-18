@@ -48,19 +48,23 @@ Then start `.\fenster.exe` and work through the list below.
    then one checked entry per captured window.
 
 4. **Restore moves windows back.** Move two of the saved windows elsewhere
-   on screen, then click the layout's "Alle wiederherstellen" (or the layout
-   row itself). Both windows return to their saved position and size. The
-   balloon reads `<n> Fenster wiederhergestellt` with a count matching the
-   number of windows actually moved.
+   on screen, then open the layout's submenu and click "Alle
+   wiederherstellen" (Win32 cannot make the layout row itself clickable when
+   it owns a submenu, so this is the only way to fire the restore). Both
+   windows return to their saved position and size. The balloon reads
+   `<n> Fenster wiederhergestellt` with a count matching the number of
+   windows actually moved.
 
 5. **Maximized state round-trips.** Maximize one of the saved windows on a
-   specific monitor, overwrite the layout (see step 12), move/restore the
-   window elsewhere, then restore the layout. The window comes back
-   maximized, on the same monitor it was maximized on.
+   specific monitor, then in the layout's submenu click "Mit aktuellem Stand
+   überschreiben" to overwrite it, move/restore the window elsewhere, then
+   restore the layout. The window comes back maximized, on the same monitor
+   it was maximized on.
 
 6. **Minimized state round-trips.** Minimize one of the saved windows,
-   overwrite the layout, restore it after un-minimizing and moving the
-   window. The window comes back minimized.
+   overwrite the layout (as in step 5: "Mit aktuellem Stand überschreiben" in
+   its submenu), restore it after un-minimizing and moving the window. The
+   window comes back minimized.
 
 7. **Always-on-top round-trips.** Set a window to always-on-top (e.g. via its
    own UI, or a small utility), save/overwrite a layout with it in that
@@ -77,8 +81,10 @@ Then start `.\fenster.exe` and work through the list below.
    click a still-open window's entry to untick it. The menu reopens
    immediately (same click experience as before — the toggle does not close
    the tray menu). Reopen the menu again later: the entry is still unticked.
-   Restore the layout: that window is left untouched (not moved), and it does
-   not count towards "wiederhergestellt".
+   Restore the layout: that window is left untouched (not moved), it does not
+   count towards "wiederhergestellt", and it is reported separately as
+   "abgewählt" — not lumped in with "übersprungen (nicht offen)", which is
+   reserved for windows that are not actually running.
 
 10. **Setup filtering.** Change the monitor arrangement (unplug a monitor,
     change its resolution, or change its DPI scaling). Reopen the tray menu:

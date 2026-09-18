@@ -84,6 +84,11 @@ var (
 	procSetFocus         = user32.NewProc("SetFocus")
 	procGetStockObject   = gdi32.NewProc("GetStockObject")
 
+	// procRegisterWindowMessageW registers the "TaskbarCreated" message id
+	// used to re-add the tray icon after Explorer restarts (see
+	// taskbarCreatedMsg in tray_windows.go).
+	procRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
+
 	// Fix round 1: window classes need a real cursor and background brush,
 	// or a human tester sees no I-beam/arrow feedback and background paint
 	// artifacts on the dialog.
@@ -94,6 +99,10 @@ var (
 	// the expected checked/greyed state.
 	procGetMenuItemCount = user32.NewProc("GetMenuItemCount")
 	procGetMenuState     = user32.NewProc("GetMenuState")
+
+	// Test-only: used by the win32integration smoke test to read back an
+	// item's actual rendered label, to assert that AddItem escapes "&".
+	procGetMenuStringW = user32.NewProc("GetMenuStringW")
 )
 
 // Window styles, show commands and flags used by this package.

@@ -1,6 +1,7 @@
 package monitors
 
 import (
+	"math/rand"
 	"regexp"
 	"testing"
 
@@ -85,6 +86,32 @@ func TestDescribeCombinesBoth(t *testing.T) {
 	}
 	if len(got.Monitors) != 2 {
 		t.Errorf("Describe should carry the monitors, got %d", len(got.Monitors))
+	}
+}
+
+// TestFingerprintIsStableWhenMonitorsShareYXW covers the defect where the
+// normalize comparator only sorted by (Y, X, W): two monitors sharing all
+// three but differing in H tied under that comparator, and sort.Slice does
+// not guarantee stability on ties, so the canonical string — and therefore
+// the fingerprint — could come out differently between runs on identical
+// hardware. The comparator now also considers H, Scale and Primary, so no
+// two distinct monitors can tie and the result must be independent of the
+// input order.
+func TestFingerprintIsStableWhenMonitorsShareYXW(t *testing.T) {
+	tied := []store.Monitor{
+		{X: 0, Y: 0, W: 1920, H: 1080, Scale: 100, Primary: true},
+		{X: 0, Y: 0, W: 1920, H: 1200, Scale: 125},
+		{X: 0, Y: 0, W: 1920, H: 800, Scale: 100},
+	}
+	want := Fingerprint(tied)
+
+	rng := rand.New(rand.NewSource(1))
+	for i := 0; i < 50; i++ {
+		perm := append([]store.Monitor(nil), tied...)
+		rng.Shuffle(len(perm), func(a, b int) { perm[a], perm[b] = perm[b], perm[a] })
+		if got := Fingerprint(perm); got != want {
+			t.Fatalf("shuffle %d: fingerprint changed for monitors tied on Y/X/W: got %q, want %q", i, got, want)
+		}
 	}
 }
 

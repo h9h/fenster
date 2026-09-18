@@ -85,6 +85,16 @@ func (s *Store) Save() error {
 		os.Remove(tmpName)
 		return fmt.Errorf("writing temp file: %w", err)
 	}
+	// Sync before Close: the rename below is atomic, but without this the
+	// written bytes may still only exist in the OS page cache, so a crash or
+	// power loss between the rename and the next flush could leave the
+	// renamed file's on-disk content stale or truncated despite the rename
+	// itself having "succeeded".
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("syncing temp file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("closing temp file: %w", err)

@@ -49,6 +49,12 @@ type MenuInput struct {
 	CurrentFingerprint string
 	Live               []layout.Live
 	AutostartOn        bool
+	// AutostartAvailable is false when the running executable's own path
+	// could not be determined (a failed os.Executable()). Toggling autostart
+	// without a real path would write an empty value into the registry and
+	// then always read back as unchecked, so the menu item is greyed out and
+	// forced unchecked instead.
+	AutostartAvailable bool
 }
 
 var separator = Item{Separator: true}
@@ -76,12 +82,23 @@ func BuildMenu(in MenuInput) []Item {
 		items = append(items, Item{Label: "Noch keine Layouts für dieses Setup", Disabled: true})
 	}
 	if len(others) > 0 {
-		items = append(items, Item{Label: "Andere Setups", Children: others})
+		// A separator between the matching layouts (or their disabled
+		// placeholder) and "Andere Setups" mirrors the design's menu sketch;
+		// it is only emitted here, alongside the submenu it introduces,
+		// rather than unconditionally, so an absent "Andere Setups" cannot
+		// leave it sitting right next to the separator appended below and
+		// render as two adjacent dividers.
+		items = append(items, separator, Item{Label: "Andere Setups", Children: others})
 	}
 
 	return append(items,
 		separator,
-		Item{Label: "Mit Windows starten", Checked: in.AutostartOn, Action: Action{Type: ActionAutostart}},
+		Item{
+			Label:    "Mit Windows starten",
+			Checked:  in.AutostartOn && in.AutostartAvailable,
+			Disabled: !in.AutostartAvailable,
+			Action:   Action{Type: ActionAutostart},
+		},
 		Item{Label: "Speicherort öffnen", Action: Action{Type: ActionOpenFolder}},
 		Item{Label: "Beenden", Action: Action{Type: ActionQuit}},
 	)
@@ -142,18 +159,31 @@ func layoutItem(l store.Layout, live []layout.Live, suffix string) Item {
 	}
 }
 
+// isActionable reports whether it should be assigned a Win32 command id: it
+// carries a real action, it is not a separator, and it has no children. An
+// item with children is a submenu owner — a Win32 popup menu item that owns
+// a submenu cannot itself fire a command, clicking it always opens the
+// submenu instead — which is exactly why layoutItem places "Alle
+// wiederherstellen" as the first entry inside the submenu rather than
+// relying on the parent row's own (otherwise unreachable) Action.
+// render_windows.go's Render calls both this function and FlattenActions
+// directly, rather than keeping a second, independently maintained
+// traversal, so the ids it wires onto the real Win32 menu can never drift
+// from the map it hands back to its caller.
+func isActionable(it Item) bool {
+	return !it.Separator && it.Action.Type != ActionNone && len(it.Children) == 0
+}
+
 // FlattenActions assigns Win32 command ids, starting at 1 because
-// TrackPopupMenu returns 0 when the user dismisses the menu. Items that have
-// children are skipped: a Win32 popup menu cannot fire a command for an item
-// that opens a submenu, so no id is assigned there, matching Task 10's
-// renderer.
+// TrackPopupMenu returns 0 when the user dismisses the menu, to every
+// actionable item in the tree in depth-first order.
 func FlattenActions(items []Item) map[uint32]Action {
 	out := map[uint32]Action{}
 	var next uint32 = 1
 	var walk func([]Item)
 	walk = func(list []Item) {
 		for _, it := range list {
-			if !it.Separator && it.Action.Type != ActionNone && len(it.Children) == 0 {
+			if isActionable(it) {
 				out[next] = it.Action
 				next++
 			}
