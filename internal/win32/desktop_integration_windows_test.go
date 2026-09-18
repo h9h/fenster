@@ -48,6 +48,20 @@ func TestEnumerationFindsWindowsAndMonitors(t *testing.T) {
 		if m.Primary {
 			primaries++
 		}
+		// The work area must be a plausible sub-rectangle of the monitor: a
+		// real desktop always reports a non-zero rcWork, contained within
+		// rcMonitor and no larger than it (a taskbar, if any, only ever
+		// shrinks the work area relative to the full monitor rectangle).
+		if m.Work.W <= 0 || m.Work.H <= 0 {
+			t.Errorf("implausible work area %+v for monitor %+v", m.Work, m)
+		}
+		if m.Work.X < m.X || m.Work.Y < m.Y ||
+			m.Work.X+m.Work.W > m.X+m.W || m.Work.Y+m.Work.H > m.Y+m.H {
+			t.Errorf("work area %+v not contained within monitor %+v", m.Work, m)
+		}
+		if m.Work.W > m.W || m.Work.H > m.H {
+			t.Errorf("work area %+v larger than monitor %+v", m.Work, m)
+		}
 	}
 	if primaries != 1 {
 		t.Errorf("got %d primary monitors, want exactly 1", primaries)

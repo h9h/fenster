@@ -31,6 +31,19 @@ type Monitor struct {
 	H       int32 `json:"h"`
 	Scale   int   `json:"scale"` // DPI scaling in percent, 100 == 96 dpi
 	Primary bool  `json:"primary"`
+	// Work is the monitor's work area (GetMonitorInfoW's rcWork): the part of
+	// the monitor rectangle not covered by the taskbar or other appbars. A
+	// zero or non-positive Work (W<=0 or H<=0, including the zero value
+	// decoded from a layouts.json written before this field existed) means
+	// "unknown": callers fall back to the full monitor rectangle (X/Y/W/H
+	// above), the same zero-rect convention WindowEntry.Screen uses.
+	//
+	// Deliberately excluded from the monitor fingerprint (see
+	// internal/monitors.canonical): showing, hiding, resizing or moving the
+	// taskbar changes Work without changing anything a saved layout actually
+	// depends on for matching, so including it there would make layouts
+	// silently stop matching whenever the taskbar changed.
+	Work Rect `json:"work"`
 }
 
 // Setup is the monitor arrangement a layout was captured on.

@@ -221,13 +221,20 @@ var enumMonitorsCallback = syscall.NewCallback(func(hmon, hdc, lprc, data uintpt
 		H:       mi.RcMonitor.Bottom - mi.RcMonitor.Top,
 		Scale:   monitorScale(hmon),
 		Primary: mi.DwFlags&1 != 0,
+		Work: store.Rect{
+			X: mi.RcWork.Left,
+			Y: mi.RcWork.Top,
+			W: mi.RcWork.Right - mi.RcWork.Left,
+			H: mi.RcWork.Bottom - mi.RcWork.Top,
+		},
 	})
 	return 1
 })
 
-// EnumMonitors returns the current monitor arrangement in physical pixels.
-// Calls are serialized by enumMonitorsMu, so repeated or concurrent calls
-// never see each other's monitors.
+// EnumMonitors returns the current monitor arrangement in physical pixels,
+// including each monitor's work area (see store.Monitor.Work). Calls are
+// serialized by enumMonitorsMu, so repeated or concurrent calls never see
+// each other's monitors.
 func EnumMonitors() ([]store.Monitor, error) {
 	enumMonitorsMu.Lock()
 	defer enumMonitorsMu.Unlock()

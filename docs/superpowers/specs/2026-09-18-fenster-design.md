@@ -90,8 +90,8 @@ via temp file plus rename.
       "fingerprint": "a3f19c02",
       "label": "2 Monitore · 5120×1440 + 1710×1073",
       "monitors": [
-        {"x": -1747, "y": -1440, "w": 5120, "h": 1440, "scale": 100, "primary": false},
-        {"x": 0, "y": 0, "w": 1710, "h": 1073, "scale": 150, "primary": true}
+        {"x": -1747, "y": -1440, "w": 5120, "h": 1440, "scale": 100, "primary": false, "work": {"x": -1747, "y": -1440, "w": 5120, "h": 1440}},
+        {"x": 0, "y": 0, "w": 1710, "h": 1073, "scale": 150, "primary": true, "work": {"x": 0, "y": 0, "w": 1710, "h": 1033}}
       ]
     },
     "windows": [{
@@ -111,6 +111,15 @@ via temp file plus rename.
 
 Field notes:
 
+- `monitors[].work` — that monitor's work area (`GetMonitorInfoW`'s
+  `rcWork`): the part of the monitor rectangle not covered by the taskbar or
+  other appbars. Used only for off-screen clamping when restoring onto a
+  different setup (see "Monitor setup fingerprint" and "Restore algorithm"
+  below). A zero or non-positive `work` (including the zero value decoded
+  from a `layouts.json` written before this field existed) means "unknown":
+  fall back to the full monitor rectangle (`x`/`y`/`w`/`h`), the same
+  zero-rect convention `screen` uses below. Deliberately excluded from the
+  monitor fingerprint.
 - `ordinal` — the n-th window of that executable at save time; last-resort
   matching key.
 - `rect` — the *restored* rectangle (from `WINDOWPLACEMENT.rcNormalPosition`),
@@ -172,6 +181,13 @@ Computation:
 
 A readable `label` is stored alongside for menu display.
 
+Each monitor's work area (`work`, see above) is recorded alongside but
+deliberately takes no part in this computation: it is read once at capture
+time purely for later use by off-screen clamping. Showing, hiding, moving or
+resizing the taskbar changes the work area without changing the monitor
+arrangement itself, so including it in the fingerprint would make a saved
+layout silently stop matching every time the taskbar changed.
+
 Consequence accepted by the user: two physically different setups with
 identical geometry share a fingerprint and therefore share layouts.
 
@@ -222,9 +238,14 @@ checkmark cannot represent a transient per-restore selection. Instead:
       be tuned against real titles.
    3. Same executable path, matched by `ordinal` among the remainder.
 3. For each match, clamp both `rect` and, when present and valid, `screen`
-   independently: if either rectangle lies entirely outside the current
-   virtual screen, shift it onto the nearest monitor's work area (relevant
-   when restoring a layout from a foreign setup). An absent `screen` is left
+   independently (relevant when restoring a layout from a foreign setup).
+   Whether a rectangle needs to move is decided against the nearest monitor's
+   full rectangle: only a rectangle that lies entirely outside every current
+   monitor is moved, so a rectangle merely overlapping a monitor — even
+   partly under its taskbar — is left alone. A rectangle that does need to
+   move is placed inside the target monitor's work area when known, falling
+   back to its full rectangle when not (a layout saved before `work`
+   existed), and shrunk first if it does not fit. An absent `screen` is left
    untouched rather than clamped, since there is nothing real to clamp.
 4. Apply: `SetWindowPlacement` with the stored normal rectangle (`rect`) and
    the stored show command, then, for a normal-state window only,

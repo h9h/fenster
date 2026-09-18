@@ -115,6 +115,38 @@ func TestFingerprintIsStableWhenMonitorsShareYXW(t *testing.T) {
 	}
 }
 
+// TestFingerprintIgnoresTheWorkArea is the regression pin for the
+// most important constraint of the work-area clamping change: the work area
+// must never enter the fingerprint. Two arrangements identical except for
+// their work areas (e.g. the taskbar shown vs. hidden, or moved to a
+// different edge) must produce the same fingerprint and the same label, or
+// every saved layout would silently stop matching whenever the taskbar
+// changed.
+func TestFingerprintIgnoresTheWorkArea(t *testing.T) {
+	withTaskbar := []store.Monitor{
+		{X: -1747, Y: -1440, W: 5120, H: 1440, Scale: 100, Work: store.Rect{X: -1747, Y: -1440, W: 5120, H: 1440}},
+		{X: 0, Y: 0, W: 1710, H: 1073, Scale: 150, Primary: true, Work: store.Rect{X: 0, Y: 0, W: 1710, H: 1033}},
+	}
+	withoutTaskbar := []store.Monitor{
+		{X: -1747, Y: -1440, W: 5120, H: 1440, Scale: 100},
+		{X: 0, Y: 0, W: 1710, H: 1073, Scale: 150, Primary: true},
+	}
+	differentWorkArea := []store.Monitor{
+		{X: -1747, Y: -1440, W: 5120, H: 1440, Scale: 100, Work: store.Rect{X: -1747, Y: -1340, W: 5120, H: 1340}},
+		{X: 0, Y: 0, W: 1710, H: 1073, Scale: 150, Primary: true, Work: store.Rect{X: 40, Y: 0, W: 1670, H: 1073}},
+	}
+
+	if Fingerprint(withTaskbar) != Fingerprint(withoutTaskbar) {
+		t.Errorf("fingerprint changed when the work area appeared")
+	}
+	if Fingerprint(withTaskbar) != Fingerprint(differentWorkArea) {
+		t.Errorf("fingerprint changed when only the work area differed")
+	}
+	if Label(withTaskbar) != Label(withoutTaskbar) {
+		t.Errorf("label changed when the work area appeared")
+	}
+}
+
 func TestFingerprintIsTranslationInvariantWithoutAPrimaryMonitor(t *testing.T) {
 	// No primary monitor set, arrangement identical but shifted.
 	noPrimary := []store.Monitor{

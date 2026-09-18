@@ -2,11 +2,16 @@ package layout
 
 import "fenster/internal/store"
 
-// Clamp keeps a target rectangle reachable. A rectangle that overlaps any
-// monitor is returned unchanged — a window deliberately hanging off an edge
-// stays where it was. A rectangle entirely outside every monitor, which
-// happens when a layout from a different setup is restored, is moved onto the
-// nearest monitor and shrunk if it does not fit.
+// Clamp keeps a target rectangle reachable. The visibility test — deciding
+// whether the rectangle needs to move at all — always uses the full monitor
+// rectangle: a rectangle that overlaps any monitor is returned unchanged, so
+// a window the user deliberately dragged partly under the taskbar is never
+// moved. A rectangle entirely outside every monitor, which happens when a
+// layout from a different setup is restored, is moved onto the nearest
+// monitor's work area (the taskbar-free portion of the monitor) and shrunk if
+// it does not fit; when that monitor's work area is unknown (zero, e.g. a
+// layout enumerated before store.Monitor.Work existed), the full monitor
+// rectangle is used instead, matching the previous behaviour.
 func Clamp(r store.Rect, ms []store.Monitor) store.Rect {
 	if len(ms) == 0 {
 		return r
@@ -17,7 +22,7 @@ func Clamp(r store.Rect, ms []store.Monitor) store.Rect {
 		}
 	}
 
-	target := nearest(r, ms)
+	target := placementArea(nearest(r, ms))
 	out := r
 	if out.W > target.W {
 		out.W = target.W
@@ -28,6 +33,17 @@ func Clamp(r store.Rect, ms []store.Monitor) store.Rect {
 	out.X = clampInt32(out.X, target.X, target.X+target.W-out.W)
 	out.Y = clampInt32(out.Y, target.Y, target.Y+target.H-out.H)
 	return out
+}
+
+// placementArea returns the rectangle a window should be placed inside on
+// monitor m: its work area when known, falling back to the full monitor
+// rectangle when Work is the zero value (W<=0 or H<=0), the same convention
+// store.WindowEntry.Screen uses for "absent".
+func placementArea(m store.Monitor) store.Rect {
+	if m.Work.W > 0 && m.Work.H > 0 {
+		return m.Work
+	}
+	return store.Rect{X: m.X, Y: m.Y, W: m.W, H: m.H}
 }
 
 // nearest returns the monitor whose centre is closest to the rectangle's centre.
