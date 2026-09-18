@@ -17,6 +17,7 @@ type Live struct {
 	Class   string
 	Exe     string
 	Rect    store.Rect // restored rectangle, even when the window is maximized
+	Screen  store.Rect // actual on-screen rectangle (GetWindowRect); differs from Rect for a snapped window
 	State   store.WindowState
 	Topmost bool
 	Visible bool
@@ -69,6 +70,7 @@ func Capture(live []Live) []store.WindowEntry {
 			Title:   w.Title,
 			Ordinal: ordinals[key],
 			Rect:    w.Rect,
+			Screen:  w.Screen,
 			State:   w.State,
 			Topmost: w.Topmost,
 			Include: true,

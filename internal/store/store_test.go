@@ -26,6 +26,7 @@ func sampleLayout(id, name string) Layout {
 			Title:   "main.go - Editor",
 			Ordinal: 0,
 			Rect:    Rect{X: 227, Y: -682, W: 1129, H: 635},
+			Screen:  Rect{X: -46, Y: -1440, W: 3425, H: 1398},
 			State:   StateNormal,
 			Include: true,
 		}},
@@ -50,6 +51,56 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if layouts[0].Name != "Docked" || layouts[0].Windows[0].Rect.Y != -682 {
 		t.Errorf("round trip mismatch: %+v", layouts[0])
+	}
+	if want := (Rect{X: -46, Y: -1440, W: 3425, H: 1398}); layouts[0].Windows[0].Screen != want {
+		t.Errorf("Screen round trip mismatch: got %+v, want %+v", layouts[0].Windows[0].Screen, want)
+	}
+}
+
+// TestLoadOldLayoutWithoutScreenDefaultsToZero pins backward compatibility:
+// a layouts.json written before the Screen field existed has no "screen" key
+// at all, and must still decode cleanly with a zero Screen, which callers
+// treat as "absent, behave as before" rather than as a real rectangle at
+// (0,0).
+func TestLoadOldLayoutWithoutScreenDefaultsToZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "layouts.json")
+	oldFormat := `{
+		"version": 1,
+		"layouts": [{
+			"id": "l1",
+			"name": "Docked",
+			"created": "2026-09-18T13:40:00Z",
+			"updated": "2026-09-18T13:40:00Z",
+			"setup": {"fingerprint": "a3f19c02", "label": "", "monitors": []},
+			"windows": [{
+				"exe": "C:\\a\\editor.exe",
+				"class": "EditorClass",
+				"title": "Editor",
+				"ordinal": 0,
+				"rect": {"x": 227, "y": -682, "w": 1129, "h": 635},
+				"state": "normal",
+				"topmost": false,
+				"include": true
+			}]
+		}]
+	}`
+	if err := os.WriteFile(path, []byte(oldFormat), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(path)
+	if _, err := s.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	layouts := s.Layouts()
+	if len(layouts) != 1 || len(layouts[0].Windows) != 1 {
+		t.Fatalf("unexpected layouts: %+v", layouts)
+	}
+	if got := layouts[0].Windows[0].Screen; got != (Rect{}) {
+		t.Errorf("Screen = %+v, want zero value for an old file without the field", got)
+	}
+	if got := layouts[0].Windows[0].Rect; got != (Rect{X: 227, Y: -682, W: 1129, H: 635}) {
+		t.Errorf("Rect = %+v, want the value from the old file", got)
 	}
 }
 

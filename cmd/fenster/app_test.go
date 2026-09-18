@@ -3,7 +3,45 @@ package main
 import (
 	"testing"
 	"time"
+
+	"fenster/internal/store"
 )
+
+var restoreMonitors = []store.Monitor{
+	{X: 0, Y: 0, W: 1920, H: 1080, Scale: 100, Primary: true},
+}
+
+// TestClampEntryClampsBothRectangles pins the snapped-window fix's restore
+// path: both the restored rect and the screen rect must be clamped against
+// the current monitors independently, so a layout restored on a foreign
+// monitor setup lands on screen either way.
+func TestClampEntryClampsBothRectangles(t *testing.T) {
+	e := store.WindowEntry{
+		Rect:   store.Rect{X: 9000, Y: 9000, W: 800, H: 600},
+		Screen: store.Rect{X: 9500, Y: 9500, W: 700, H: 500},
+	}
+	rect, screen := clampEntry(e, restoreMonitors)
+
+	if rect.X >= 9000 || rect.Y >= 9000 {
+		t.Errorf("Rect not clamped: %+v", rect)
+	}
+	if screen.X >= 9500 || screen.Y >= 9500 {
+		t.Errorf("Screen not clamped: %+v", screen)
+	}
+}
+
+// TestClampEntryLeavesAnAbsentScreenAlone pins backward compatibility: an
+// entry from an old layout file with no Screen (zero value) must stay zero
+// rather than being "clamped" into a bogus on-screen rectangle at (0,0).
+func TestClampEntryLeavesAnAbsentScreenAlone(t *testing.T) {
+	e := store.WindowEntry{
+		Rect: store.Rect{X: 100, Y: 100, W: 800, H: 600},
+	}
+	_, screen := clampEntry(e, restoreMonitors)
+	if screen != (store.Rect{}) {
+		t.Errorf("Screen = %+v, want zero value left untouched", screen)
+	}
+}
 
 func TestSuggestName(t *testing.T) {
 	now := time.Date(2026, 9, 18, 13, 40, 0, 0, time.UTC)

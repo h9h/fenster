@@ -16,6 +16,7 @@ type WindowInfo struct {
 	Class   string
 	Exe     string
 	Rect    store.Rect
+	Screen  store.Rect // actual on-screen rectangle from GetWindowRect; see store.WindowEntry.Screen
 	State   store.WindowState
 	Topmost bool
 	Visible bool
@@ -112,6 +113,14 @@ func describeWindow(hwnd uintptr) WindowInfo {
 	// not one of store.WindowState's three valid values.
 	info.State = store.StateNormal
 
+	// windowRect (GetWindowRect) is read once and reused both as info.Screen
+	// and as the GetWindowPlacement fallback below, rather than calling it
+	// twice.
+	screenRect, screenOK := windowRect(hwnd)
+	if screenOK {
+		info.Screen = screenRect
+	}
+
 	wp := windowPlacement{Length: uint32(unsafe.Sizeof(windowPlacement{}))}
 	if ret, _, _ := procGetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp))); ret != 0 {
 		r := wp.RcNormalPosition
@@ -124,16 +133,17 @@ func describeWindow(hwnd uintptr) WindowInfo {
 		default:
 			info.State = store.StateNormal
 		}
-	} else if wr, ok := windowRect(hwnd); ok {
+	} else if screenOK {
 		// GetWindowPlacement failed; fall back to the current screen
 		// rectangle so the window still gets a usable, non-zero rect. The
 		// state stays store.StateNormal, set above.
-		info.Rect = wr
+		info.Rect = screenRect
 	}
-	// If both calls failed, info.Rect stays its zero value (W == H == 0).
-	// internal/layout.Eligible rejects windows with a non-positive width or
-	// height, so such a window is dropped rather than saved with a bogus
-	// rectangle.
+	// If both calls failed, info.Rect and info.Screen stay their zero value
+	// (W == H == 0). internal/layout.Eligible rejects windows with a
+	// non-positive Rect width or height, so such a window is dropped rather
+	// than saved with a bogus rectangle; a zero Screen alone is legitimate
+	// and treated as "absent" by ApplyPlacement.
 	return info
 }
 
@@ -248,7 +258,17 @@ func monitorScale(hmon uintptr) int {
 // flag. The restored rectangle is set first so that a maximized window is
 // maximized on the monitor it was saved on, and so that un-maximizing later
 // yields the saved geometry.
-func ApplyPlacement(handle uintptr, r store.Rect, state store.WindowState, topmost bool) error {
+//
+// screen is the window's actual on-screen rectangle at save time (see
+// store.WindowEntry.Screen). It is only used for a normal-state window, and
+// only when present and valid (W>0 and H>0): that is the fix for a window
+// that was snapped via Windows Snap, where r (rcNormalPosition) is
+// deliberately the pre-snap rectangle Windows keeps around so the user can
+// drag the window back out, while screen is where it actually sits.
+// Minimized and maximized windows ignore screen entirely — a minimized
+// window's GetWindowRect reports (-32000,-32000), which must never be used
+// to position anything.
+func ApplyPlacement(handle uintptr, r store.Rect, screen store.Rect, state store.WindowState, topmost bool) error {
 	wp := windowPlacement{
 		Length:           uint32(unsafe.Sizeof(windowPlacement{})),
 		RcNormalPosition: rect{Left: r.X, Top: r.Y, Right: r.X + r.W, Bottom: r.Y + r.H},
@@ -267,14 +287,21 @@ func ApplyPlacement(handle uintptr, r store.Rect, state store.WindowState, topmo
 
 	// SetWindowPlacement works in workspace coordinates, which differ from
 	// screen coordinates when the primary monitor has a taskbar. For a normal
-	// window, correct the position afterwards with screen coordinates.
+	// window, correct the position afterwards with screen coordinates: use
+	// the actual on-screen rectangle when it is present and valid, falling
+	// back to r for layouts saved before Screen existed or for a window that
+	// reported no usable GetWindowRect at save time.
 	//
 	// Coordinates are passed through uintptr(int32(...)) so that negative
 	// values (windows on a monitor left of or above the primary) sign-extend
 	// correctly instead of appearing as huge unsigned numbers.
 	if state == store.StateNormal {
+		pos := r
+		if screen.W > 0 && screen.H > 0 {
+			pos = screen
+		}
 		flags := uintptr(swpNoZOrder | swpNoActivate)
-		if ret, _, err := procSetWindowPos.Call(handle, 0, uintptr(int32(r.X)), uintptr(int32(r.Y)), uintptr(int32(r.W)), uintptr(int32(r.H)), flags); ret == 0 {
+		if ret, _, err := procSetWindowPos.Call(handle, 0, uintptr(int32(pos.X)), uintptr(int32(pos.Y)), uintptr(int32(pos.W)), uintptr(int32(pos.H)), flags); ret == 0 {
 			return fmt.Errorf("SetWindowPos: %w", err)
 		}
 	}

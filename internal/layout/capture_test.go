@@ -80,6 +80,7 @@ func TestCaptureCopiesGeometryStateAndDefaultsIncludeToTrue(t *testing.T) {
 	w.State = store.StateMaximized
 	w.Topmost = true
 	w.Rect = store.Rect{X: -1700, Y: -1400, W: 1920, H: 1080}
+	w.Screen = store.Rect{X: -1700, Y: -1400, W: 1920, H: 1080}
 
 	got := Capture([]Live{w})
 	if len(got) != 1 {
@@ -91,11 +92,36 @@ func TestCaptureCopiesGeometryStateAndDefaultsIncludeToTrue(t *testing.T) {
 		Title:   "Editor",
 		Ordinal: 0,
 		Rect:    store.Rect{X: -1700, Y: -1400, W: 1920, H: 1080},
+		Screen:  store.Rect{X: -1700, Y: -1400, W: 1920, H: 1080},
 		State:   store.StateMaximized,
 		Topmost: true,
 		Include: true,
 	}
 	if got[0] != want {
 		t.Errorf("Capture = %+v, want %+v", got[0], want)
+	}
+}
+
+// TestCaptureCopiesScreenSeparatelyFromRect pins the snapped-window fix: a
+// window snapped via Windows Snap keeps a pre-snap rcNormalPosition (Rect)
+// that differs from what is actually on screen (Screen). Capture must not
+// collapse the two into one value.
+func TestCaptureCopiesScreenSeparatelyFromRect(t *testing.T) {
+	w := live("Editor", "EditorClass", `C:\a\editor.exe`)
+	w.Rect = store.Rect{X: 1512, Y: -932, W: 1022, H: 694}    // pre-snap, rcNormalPosition
+	w.Screen = store.Rect{X: -46, Y: -1440, W: 3425, H: 1398} // actually on screen, snapped
+
+	got := Capture([]Live{w})
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	if got[0].Rect == got[0].Screen {
+		t.Fatalf("Rect and Screen must be captured independently, got both = %+v", got[0].Rect)
+	}
+	if got[0].Rect != w.Rect {
+		t.Errorf("Rect = %+v, want %+v", got[0].Rect, w.Rect)
+	}
+	if got[0].Screen != w.Screen {
+		t.Errorf("Screen = %+v, want %+v", got[0].Screen, w.Screen)
 	}
 }
