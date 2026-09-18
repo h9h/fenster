@@ -134,6 +134,14 @@ monitor, and its DPI scaling percentage. Monitors are sorted into a
 canonical order first, so the fingerprint does not depend on enumeration
 order.
 
+Each saved monitor also carries its work area — the part of the monitor not
+covered by the taskbar — used when a restored window must be moved onto a
+monitor it was not saved on (see "Off-screen clamping" below). The work area
+is deliberately **not** part of the fingerprint: showing, hiding, moving or
+resizing the taskbar changes the work area without changing the monitor
+arrangement, and folding it into the fingerprint would make saved layouts
+silently stop matching every time the taskbar changed.
+
 Deliberately **not** part of the fingerprint: which physical monitor it is —
 no device name, adapter id, or serial number is used. Two consequences follow
 directly from that:
@@ -144,6 +152,27 @@ directly from that:
 - Two different docking stations, or two different desks, that happen to
   produce the same monitor count, resolutions, relative positions and DPI
   scaling are indistinguishable to fenster and will share the same layouts.
+
+## Off-screen clamping
+
+A layout saved on one monitor setup can be restored on another — the offered
+list is filtered by fingerprint, but "Andere Setups" makes every layout
+reachable regardless. When a saved window's target rectangle ends up entirely
+outside every current monitor, it is moved onto the nearest monitor instead
+of being placed off-screen where the user could never reach it, shrinking it
+first if it does not fit.
+
+Two different rectangles are involved, deliberately:
+
+- **Whether to move the window at all** is decided against each monitor's
+  full rectangle: a rectangle that overlaps any monitor at all, even just
+  barely and even if that overlap runs under the taskbar, is left exactly
+  where it was. A window the user deliberately dragged so it hangs partly
+  under the taskbar is never second-guessed.
+- **Where a window that does need to move ends up** is the target monitor's
+  work area when known, falling back to the full monitor rectangle when it is
+  not (a layout saved before the work area was recorded). This is what keeps
+  a window that must be moved from landing underneath the taskbar.
 
 ## Window matching
 
