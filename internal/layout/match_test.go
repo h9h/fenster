@@ -124,22 +124,25 @@ func TestMatchDoesNotConfuseTitlesSharingAnUnrelatedSuffix(t *testing.T) {
 		entry(`C:\a\wt.exe`, "Session - main", 0),
 		entry(`C:\a\wt.exe`, "Session - test", 1),
 	}
-	// Live windows enumerate in the opposite order of the saved entries; if
-	// NormalizeTitle stripped "- main"/"- test" as if they were the app name,
-	// both titles would collapse to "session" and pass 2 could swap them.
+	// Live titles carry a leading modification marker so pass 1's exact-title
+	// match cannot resolve them; this forces pass 2, where NormalizeTitle must
+	// strip the marker but preserve "- main"/"- test" (neither names wt.exe).
+	// Enumerated in the opposite order of the saved entries, so a collapse to
+	// a shared normalized string would swap the two.
 	windows := []Live{
-		liveAt(1, `C:\a\wt.exe`, "Session - test"),
-		liveAt(2, `C:\a\wt.exe`, "Session - main"),
+		liveAt(1, `C:\a\wt.exe`, "● Session - test"),
+		liveAt(2, `C:\a\wt.exe`, "● Session - main"),
 	}
 
 	plan := MatchEntries(entries, windows)
 	if len(plan.Matches) != 2 {
 		t.Fatalf("expected both entries to match, got %+v", plan.Matches)
 	}
-	for _, m := range plan.Matches {
-		if m.Entry.Title != m.Live.Title {
-			t.Errorf("entry %q was matched to live window %q, want same title", m.Entry.Title, m.Live.Title)
-		}
+	if plan.Matches[0].Entry.Title != "Session - main" || plan.Matches[0].Live.Handle != 2 {
+		t.Errorf("Session - main should match handle 2 (%q), got %+v", "● Session - main", plan.Matches[0])
+	}
+	if plan.Matches[1].Entry.Title != "Session - test" || plan.Matches[1].Live.Handle != 1 {
+		t.Errorf("Session - test should match handle 1 (%q), got %+v", "● Session - test", plan.Matches[1])
 	}
 }
 
