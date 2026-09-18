@@ -87,3 +87,27 @@ func TestDescribeCombinesBoth(t *testing.T) {
 		t.Errorf("Describe should carry the monitors, got %d", len(got.Monitors))
 	}
 }
+
+func TestFingerprintIsTranslationInvariantWithoutAPrimaryMonitor(t *testing.T) {
+	// No primary monitor set, arrangement identical but shifted.
+	noPrimary := []store.Monitor{
+		{X: -1747, Y: -1440, W: 5120, H: 1440, Scale: 100},
+		{X: 0, Y: 0, W: 1710, H: 1073, Scale: 150},
+	}
+	shifted := []store.Monitor{
+		{X: -1747 + 500, Y: -1440 + 500, W: 5120, H: 1440, Scale: 100},
+		{X: 500, Y: 500, W: 1710, H: 1073, Scale: 150},
+	}
+	if Fingerprint(noPrimary) != Fingerprint(shifted) {
+		t.Errorf("fingerprint should be translation-invariant even without primary monitor")
+	}
+
+	// The same arrangement but with a primary flag should differ from noPrimary.
+	withPrimary := []store.Monitor{
+		{X: -1747, Y: -1440, W: 5120, H: 1440, Scale: 100},
+		{X: 0, Y: 0, W: 1710, H: 1073, Scale: 150, Primary: true},
+	}
+	if Fingerprint(noPrimary) == Fingerprint(withPrimary) {
+		t.Errorf("primary flag should affect the fingerprint (canonical includes *)")
+	}
+}

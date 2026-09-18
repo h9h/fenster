@@ -62,22 +62,12 @@ func canonical(ms []store.Monitor) string {
 }
 
 // normalize copies the monitors, translates them so the primary monitor's
-// top-left corner is the origin, and sorts them by position.
+// top-left corner is the origin, and sorts them by position. If no monitor
+// is flagged primary, falls back to the topmost-leftmost monitor.
 func normalize(ms []store.Monitor) []store.Monitor {
 	out := make([]store.Monitor, len(ms))
 	copy(out, ms)
 
-	var originX, originY int32
-	for _, m := range out {
-		if m.Primary {
-			originX, originY = m.X, m.Y
-			break
-		}
-	}
-	for i := range out {
-		out[i].X -= originX
-		out[i].Y -= originY
-	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Y != out[j].Y {
 			return out[i].Y < out[j].Y
@@ -87,5 +77,25 @@ func normalize(ms []store.Monitor) []store.Monitor {
 		}
 		return out[i].W < out[j].W
 	})
+
+	var originX, originY int32
+	hasPrimary := false
+	// Use primary monitor if found, otherwise use topmost-leftmost.
+	for _, m := range out {
+		if m.Primary {
+			originX, originY = m.X, m.Y
+			hasPrimary = true
+			break
+		}
+	}
+	if !hasPrimary && len(out) > 0 {
+		// No primary monitor; use first (topmost-leftmost after sort).
+		originX, originY = out[0].X, out[0].Y
+	}
+
+	for i := range out {
+		out[i].X -= originX
+		out[i].Y -= originY
+	}
 	return out
 }
