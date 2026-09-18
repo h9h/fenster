@@ -44,6 +44,24 @@ func find(items []Item, labelPart string) (Item, bool) {
 	return Item{}, false
 }
 
+// hasAdjacentSeparators reports whether any level of the menu tree — top
+// level or any submenu — has two separators next to each other, which Win32
+// renders as a dangling double divider. Reused by every test that builds a
+// menu, so a future change cannot reintroduce the defect anywhere in the tree.
+func hasAdjacentSeparators(items []Item) bool {
+	for i := 1; i < len(items); i++ {
+		if items[i].Separator && items[i-1].Separator {
+			return true
+		}
+	}
+	for _, it := range items {
+		if hasAdjacentSeparators(it.Children) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMatchingLayoutsAreTopLevelOthersAreNested(t *testing.T) {
 	in := MenuInput{
 		Layouts: []store.Layout{
@@ -139,6 +157,74 @@ func TestLayoutSubmenuHasTheManagementCommands(t *testing.T) {
 			t.Errorf("submenu command %q missing", want)
 		}
 	}
+	if hasAdjacentSeparators(items) {
+		t.Errorf("menu has adjacent separators: %+v", items)
+	}
+}
+
+func TestLayoutWithNoWindowsHasNoDanglingSeparator(t *testing.T) {
+	in := MenuInput{
+		Layouts:            []store.Layout{layoutFor("l1", "Docked", "aaaa1111")}, // no titles => no windows
+		CurrentFingerprint: "aaaa1111",
+	}
+	items := BuildMenu(in)
+
+	if hasAdjacentSeparators(items) {
+		t.Fatalf("menu has adjacent separators: %+v", items)
+	}
+
+	docked, ok := find(items, "Docked")
+	if !ok {
+		t.Fatal("layout submenu missing")
+	}
+	for _, want := range []string{"Alle wiederherstellen", "Mit aktuellem Stand überschreiben", "Umbenennen", "Löschen"} {
+		if _, ok := find(docked.Children, want); !ok {
+			t.Errorf("submenu command %q missing for windowless layout", want)
+		}
+	}
+}
+
+func TestMultipleLayoutsSharingFingerprintAreBothTopLevel(t *testing.T) {
+	in := MenuInput{
+		Layouts: []store.Layout{
+			layoutFor("l1", "Docked", "aaaa1111", "alpha"),
+			layoutFor("l2", "Second", "aaaa1111", "beta"),
+		},
+		CurrentFingerprint: "aaaa1111",
+	}
+	items := BuildMenu(in)
+
+	if hasAdjacentSeparators(items) {
+		t.Fatalf("menu has adjacent separators: %+v", items)
+	}
+
+	var topLabels []string
+	for _, it := range items {
+		topLabels = append(topLabels, it.Label)
+	}
+	joined := strings.Join(topLabels, "|")
+	if !strings.Contains(joined, "Docked") || !strings.Contains(joined, "Second") {
+		t.Fatalf("both layouts must be top level: %v", topLabels)
+	}
+	if strings.Contains(joined, "Andere Setups") {
+		t.Errorf("no layout should be nested when all match the current fingerprint: %v", topLabels)
+	}
+
+	var l1, l2 Item
+	for _, it := range items {
+		switch it.Label {
+		case "Docked":
+			l1 = it
+		case "Second":
+			l2 = it
+		}
+	}
+	if l1.Action.Type != ActionRestore || l1.Action.LayoutID != "l1" {
+		t.Errorf("wrong action for first layout: %+v", l1.Action)
+	}
+	if l2.Action.Type != ActionRestore || l2.Action.LayoutID != "l2" {
+		t.Errorf("wrong action for second layout: %+v", l2.Action)
+	}
 }
 
 func TestGlobalCommands(t *testing.T) {
@@ -159,6 +245,9 @@ func TestGlobalCommands(t *testing.T) {
 	if !ok || quit.Action.Type != ActionQuit {
 		t.Errorf("quit command missing or wrong: %+v", quit)
 	}
+	if hasAdjacentSeparators(items) {
+		t.Errorf("menu has adjacent separators: %+v", items)
+	}
 }
 
 func TestEmptyStoreStillOffersSaveAndQuit(t *testing.T) {
@@ -168,6 +257,9 @@ func TestEmptyStoreStillOffersSaveAndQuit(t *testing.T) {
 	}
 	if _, ok := find(items, "Noch keine Layouts"); !ok {
 		t.Error("expected a disabled hint when there are no layouts")
+	}
+	if hasAdjacentSeparators(items) {
+		t.Errorf("menu has adjacent separators: %+v", items)
 	}
 }
 

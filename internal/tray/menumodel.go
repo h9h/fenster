@@ -98,7 +98,13 @@ func layoutItem(l store.Layout, live []layout.Live, suffix string) Item {
 
 	children := []Item{
 		{Label: "Alle wiederherstellen", Action: Action{Type: ActionRestore, LayoutID: l.ID}},
-		separator,
+	}
+	// The separator before the window list is only emitted when there is a
+	// window list to separate from the management commands below; otherwise
+	// it would sit right next to the trailing separator and render as two
+	// adjacent dividers.
+	if len(l.Windows) > 0 {
+		children = append(children, separator)
 	}
 	for i, w := range l.Windows {
 		label := fmt.Sprintf("%s — %s", filepath.Base(w.Exe), w.Title)
