@@ -11,9 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"fenster/internal/autostart"
 	"fenster/internal/layout"
@@ -26,69 +24,6 @@ import (
 //go:embed icon.ico
 var embeddedIcon []byte
 
-// The application needs two raw Win32 calls, CreateMutexW (single-instance
-// enforcement) and MessageBoxW (reporting a fatal startup error before any
-// tray icon exists to show a balloon from), that internal/win32 does not
-// expose. internal/win32's package doc states it is "the only package that
-// uses unsafe"; these few lines are a deliberate, narrow exception to that
-// invariant rather than an oversight — see the task report for the
-// reasoning. Everything else in this file works through internal/win32.
-var (
-	kernel32 = syscall.NewLazyDLL("kernel32.dll")
-	user32   = syscall.NewLazyDLL("user32.dll")
-
-	procCreateMutexW = kernel32.NewProc("CreateMutexW")
-	procCloseHandle  = kernel32.NewProc("CloseHandle")
-	procMessageBoxW  = user32.NewProc("MessageBoxW")
-)
-
-const (
-	errorAlreadyExists = 183
-
-	mbOK              = 0x00000000
-	mbIconInformation = 0x00000040
-	mbIconError       = 0x00000010
-)
-
-// messageBox shows a simple OK message box. It is used only for the handful
-// of startup failures that happen before a tray icon (and therefore a
-// balloon) exists.
-func messageBox(title, text string, flags uintptr) {
-	textPtr, err := syscall.UTF16PtrFromString(text)
-	if err != nil {
-		return
-	}
-	titlePtr, err := syscall.UTF16PtrFromString(title)
-	if err != nil {
-		return
-	}
-	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(titlePtr)), flags)
-}
-
-// acquireSingleInstance creates (or opens) the application's named mutex. It
-// returns the mutex handle and true once fenster is the only running
-// instance; if another instance already holds the mutex it closes the handle
-// itself and returns (0, false). Failure to even attempt the check is not
-// fatal: fenster proceeds as if it were the only instance rather than
-// refusing to start over something that cannot be verified.
-func acquireSingleInstance() (uintptr, bool) {
-	namePtr, err := syscall.UTF16PtrFromString(`Local\fenster-single-instance`)
-	if err != nil {
-		log.Printf("single instance: %v", err)
-		return 0, true
-	}
-	h, _, callErr := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(namePtr)))
-	if h == 0 {
-		log.Printf("CreateMutexW: %v", callErr)
-		return 0, true
-	}
-	if errno, ok := callErr.(syscall.Errno); ok && errno == errorAlreadyExists {
-		procCloseHandle.Call(h)
-		return 0, false
-	}
-	return h, true
-}
-
 func main() {
 	// Win32 windows and message loops are thread-affine; without this the Go
 	// scheduler could migrate this goroutine to a different OS thread and
@@ -97,23 +32,28 @@ func main() {
 
 	win32.EnableDPIAwareness()
 
-	mutexHandle, isOnly := acquireSingleInstance()
-	if !isOnly {
-		messageBox("fenster", "fenster läuft bereits.", mbOK|mbIconInformation)
+	release, alreadyRunning, err := win32.AcquireSingleInstance(`Local\fenster-single-instance`)
+	if err != nil {
+		// Failure to even attempt the check is not fatal: proceed as if this
+		// were the only instance rather than refusing to start over
+		// something that cannot be verified. There is no log output target
+		// yet at this point, so this failure is otherwise unreported.
+		log.Printf("single instance: %v", err)
+	}
+	if alreadyRunning {
+		win32.Alert("fenster", "fenster läuft bereits.")
 		return
 	}
-	if mutexHandle != 0 {
-		defer procCloseHandle.Call(mutexHandle)
-	}
+	defer release()
 
 	storePath, err := store.DefaultPath()
 	if err != nil {
-		messageBox("fenster", fmt.Sprintf("Speicherort konnte nicht ermittelt werden:\n%v", err), mbOK|mbIconError)
+		win32.Alert("fenster", fmt.Sprintf("Speicherort konnte nicht ermittelt werden:\n%v", err))
 		return
 	}
 	appDir := filepath.Dir(storePath)
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
-		messageBox("fenster", fmt.Sprintf("Datenverzeichnis konnte nicht angelegt werden:\n%v", err), mbOK|mbIconError)
+		win32.Alert("fenster", fmt.Sprintf("Datenverzeichnis konnte nicht angelegt werden:\n%v", err))
 		return
 	}
 
@@ -142,7 +82,7 @@ func main() {
 	st := store.New(storePath)
 	recoveredPath, err := st.Load()
 	if err != nil {
-		messageBox("fenster", fmt.Sprintf("Layouts konnten nicht geladen werden:\n%v", err), mbOK|mbIconError)
+		win32.Alert("fenster", fmt.Sprintf("Layouts konnten nicht geladen werden:\n%v", err))
 		return
 	}
 
@@ -159,14 +99,14 @@ func main() {
 
 	msgWindow, err := win32.NewMessageWindow("fensterMessageWindow", app.onTrayClick)
 	if err != nil {
-		messageBox("fenster", fmt.Sprintf("Anwendungsfenster konnte nicht erzeugt werden:\n%v", err), mbOK|mbIconError)
+		win32.Alert("fenster", fmt.Sprintf("Anwendungsfenster konnte nicht erzeugt werden:\n%v", err))
 		return
 	}
 	app.msgWindow = msgWindow
 
 	trayIcon, err := win32.NewTrayIcon(msgWindow.Handle(), iconHandle, "fenster")
 	if err != nil {
-		messageBox("fenster", fmt.Sprintf("Tray-Symbol konnte nicht erzeugt werden:\n%v", err), mbOK|mbIconError)
+		win32.Alert("fenster", fmt.Sprintf("Tray-Symbol konnte nicht erzeugt werden:\n%v", err))
 		return
 	}
 	app.trayIcon = trayIcon
@@ -420,16 +360,38 @@ func (a *application) actionDelete(id string) {
 		return
 	}
 
+	// Snapshot the exact storage order so a failed Save can be rolled back to
+	// look exactly as it did before: Store's public API has no "insert at
+	// index", only Add (append), so simply re-adding l after a failed delete
+	// would silently move it to the end of the list.
+	order := append([]store.Layout(nil), a.store.Layouts()...)
+
 	if err := a.store.Delete(id); err != nil {
 		a.reportError("Löschen fehlgeschlagen", err)
 		return
 	}
 	if err := a.store.Save(); err != nil {
-		a.store.Add(l) // roll back (re-added at the end of the list, but present)
+		a.restoreOrder(order)
 		a.reportError("Löschen fehlgeschlagen", err)
 		return
 	}
 	a.notify(fmt.Sprintf("Layout %q gelöscht", l.Name))
+}
+
+// restoreOrder replaces the store's current layouts with order, so that a
+// failed mutation can be rolled back to its exact original position rather
+// than just its presence. It only uses Store's existing public API.
+func (a *application) restoreOrder(order []store.Layout) {
+	var currentIDs []string
+	for _, l := range a.store.Layouts() {
+		currentIDs = append(currentIDs, l.ID)
+	}
+	for _, id := range currentIDs {
+		a.store.Delete(id)
+	}
+	for _, l := range order {
+		a.store.Add(l)
+	}
 }
 
 func (a *application) actionToggleAutostart() {

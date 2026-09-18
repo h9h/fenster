@@ -258,6 +258,22 @@ func Confirm(title, text string) bool {
 	return ret == idYes
 }
 
+// Alert shows a plain OK message box. It is meant for the handful of fatal
+// startup failures that happen before a tray icon (and therefore a balloon)
+// exists to report through; anything reachable after that point should use a
+// balloon instead.
+func Alert(title, text string) {
+	textPtr, err := syscall.UTF16PtrFromString(text)
+	if err != nil {
+		return
+	}
+	titlePtr, err := syscall.UTF16PtrFromString(title)
+	if err != nil {
+		return
+	}
+	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(titlePtr)), uintptr(mbOK|mbIconError))
+}
+
 // OpenInExplorer opens Windows Explorer with path selected. If path does not
 // exist yet, its containing directory is opened instead.
 func OpenInExplorer(path string) error {

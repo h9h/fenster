@@ -35,6 +35,11 @@ var (
 	procGetCurrentProcessId        = kernel32.NewProc("GetCurrentProcessId")
 	procGetModuleHandleW           = kernel32.NewProc("GetModuleHandleW")
 
+	// Task 10: single-instance guard (AcquireSingleInstance in
+	// instance_windows.go). procCloseHandle above is reused to release the
+	// mutex handle.
+	procCreateMutexW = kernel32.NewProc("CreateMutexW")
+
 	// Window-class and window-lifecycle procs. Owned by this package; Task 9
 	// reuses these same vars and must not redeclare them.
 	procRegisterClassExW = user32.NewProc("RegisterClassExW")
@@ -160,9 +165,15 @@ const (
 	tpmReturnCmd   = 0x0100
 
 	// MessageBox
+	mbOK          = 0x00000000
 	mbYesNo       = 0x00000004
+	mbIconError   = 0x00000010
 	mbIconWarning = 0x00000030
 	idYes         = 6
+
+	// errorAlreadyExists is ERROR_ALREADY_EXISTS, the last-error code
+	// CreateMutexW leaves set when the named mutex already existed.
+	errorAlreadyExists = 183
 
 	// Icons
 	imageIcon      = 1
