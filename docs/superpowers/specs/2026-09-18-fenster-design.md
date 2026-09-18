@@ -171,8 +171,10 @@ checkmark cannot represent a transient per-restore selection. Instead:
    1. Same executable path and exact title.
    2. Same executable path and similar title: compare case-insensitively after
       stripping leading modification markers (`●`, `*`, `◐`, whitespace) and a
-      trailing ` - <AppName>` / ` — <AppName>` suffix; accept the best
-      candidate above a fixed similarity threshold.
+      trailing ` - <AppName>` / ` — <AppName>` suffix; score candidates by
+      normalized Levenshtein similarity (`1 - distance/maxLen`) and accept the
+      best one at or above `0.6`. The threshold is a package constant so it can
+      be tuned against real titles.
    3. Same executable path, matched by `ordinal` among the remainder.
 3. For each match, if the target rectangle lies entirely outside the current
    virtual screen, shift it onto the nearest monitor's work area (relevant when
@@ -217,6 +219,23 @@ Beenden
   control and OK/Cancel), prefilled with a suggestion such as
   `2 Monitore · 18.09. 13:40`.
 - Deleting asks for confirmation via `MessageBoxW`.
+
+### Tray icon
+
+The standard library cannot embed Win32 resources, and no resource compiler is
+assumed to be available. A small `.ico` is embedded with `go:embed`, written to
+`%APPDATA%\fenster\fenster.ico` on first run, and loaded with
+`LoadImageW(LR_LOADFROMFILE)`. If that fails, the process falls back to the
+stock `IDI_APPLICATION` icon so the tray entry always exists.
+
+### Autostart
+
+The standard library has no registry package (`registry` lives in
+`golang.org/x/sys`, which is unavailable), so `internal/autostart` calls
+`advapi32` directly: `RegOpenKeyExW` / `RegSetValueExW` / `RegDeleteValueW` on
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value name `fenster`,
+data the quoted absolute path of the running executable. The menu checkmark
+reflects whether that value currently points at this executable.
 
 ## Error handling
 
