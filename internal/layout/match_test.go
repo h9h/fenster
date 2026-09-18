@@ -25,16 +25,20 @@ func liveAt(handle uintptr, exe, title string) Live {
 }
 
 func TestNormalizeTitle(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"● main.go - Editor", "main.go"},
-		{"* main.go — Editor", "main.go"},
-		{"◐ Go Fensterposition", "go fensterposition"},
-		{"  Inbox - Outlook  ", "inbox"},
-		{"Plain", "plain"},
+	tests := []struct{ in, exe, want string }{
+		{"● main.go - Editor", `C:\a\editor.exe`, "main.go"},
+		{"* main.go — Editor", `C:\a\editor.exe`, "main.go"},
+		{"◐ Go Fensterposition", `C:\a\editor.exe`, "go fensterposition"},
+		{"  Inbox - Outlook  ", `C:\b\outlook.exe`, "inbox"},
+		{"Plain", `C:\a\editor.exe`, "plain"},
+		// An internal dash that is not the app-name suffix survives.
+		{"Report - Draft - Editor", `C:\a\editor.exe`, "report - draft"},
+		// A trailing segment that does not name the executable survives.
+		{"Session - main", `C:\a\wt.exe`, "session - main"},
 	}
 	for _, tc := range tests {
-		if got := NormalizeTitle(tc.in); got != tc.want {
-			t.Errorf("NormalizeTitle(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := NormalizeTitle(tc.in, tc.exe); got != tc.want {
+			t.Errorf("NormalizeTitle(%q, %q) = %q, want %q", tc.in, tc.exe, got, tc.want)
 		}
 	}
 }
@@ -112,6 +116,30 @@ func TestEachLiveWindowIsConsumedOnce(t *testing.T) {
 	}
 	if len(plan.Missing) != 1 || plan.Missing[0].Ordinal != 1 {
 		t.Errorf("the second entry should be reported missing, got %+v", plan.Missing)
+	}
+}
+
+func TestMatchDoesNotConfuseTitlesSharingAnUnrelatedSuffix(t *testing.T) {
+	entries := []store.WindowEntry{
+		entry(`C:\a\wt.exe`, "Session - main", 0),
+		entry(`C:\a\wt.exe`, "Session - test", 1),
+	}
+	// Live windows enumerate in the opposite order of the saved entries; if
+	// NormalizeTitle stripped "- main"/"- test" as if they were the app name,
+	// both titles would collapse to "session" and pass 2 could swap them.
+	windows := []Live{
+		liveAt(1, `C:\a\wt.exe`, "Session - test"),
+		liveAt(2, `C:\a\wt.exe`, "Session - main"),
+	}
+
+	plan := MatchEntries(entries, windows)
+	if len(plan.Matches) != 2 {
+		t.Fatalf("expected both entries to match, got %+v", plan.Matches)
+	}
+	for _, m := range plan.Matches {
+		if m.Entry.Title != m.Live.Title {
+			t.Errorf("entry %q was matched to live window %q, want same title", m.Entry.Title, m.Live.Title)
+		}
 	}
 }
 

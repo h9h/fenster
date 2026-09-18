@@ -1,6 +1,7 @@
 package layout
 
 import (
+	"path/filepath"
 	"strings"
 
 	"fenster/internal/store"
@@ -65,15 +66,18 @@ func MatchEntries(entries []store.WindowEntry, live []Live) Plan {
 		return -1
 	})
 
-	// Pass 2: same executable, best similar title above the threshold.
+	// Pass 2: same executable, best similar title above the threshold. Ties
+	// go to the first candidate in enumeration order (strict > below), so the
+	// result is deterministic.
 	pass(func(e store.WindowEntry) int {
-		best, bestScore := -1, SimilarityThreshold
-		want := NormalizeTitle(e.Title)
+		best, bestScore := -1, -1.0
+		want := NormalizeTitle(e.Title, e.Exe)
 		for j := range candidates {
 			if !sameExe(e, j) {
 				continue
 			}
-			if score := Similarity(want, NormalizeTitle(candidates[j].Title)); score >= bestScore {
+			score := Similarity(want, NormalizeTitle(candidates[j].Title, candidates[j].Exe))
+			if score >= SimilarityThreshold && score > bestScore {
 				best, bestScore = j, score
 			}
 		}
@@ -106,17 +110,34 @@ func MatchEntries(entries []store.WindowEntry, live []Live) Plan {
 // titleTrimCutset are the modification markers applications prepend to titles.
 const titleTrimCutset = " \t●•*◐○·—-"
 
-// NormalizeTitle strips modification markers, a trailing " - AppName" suffix
-// and case, so that everyday title churn does not break matching.
-func NormalizeTitle(s string) string {
-	s = strings.TrimLeft(s, titleTrimCutset)
+// NormalizeTitle strips modification markers and case, so that everyday title
+// churn does not break matching. It also strips a trailing " - AppName"
+// suffix, but only when that suffix actually names exe (its base name without
+// extension, compared case-insensitively); an unrelated trailing segment,
+// such as a genuine part of the window's own title, is left in place.
+func NormalizeTitle(title, exe string) string {
+	s := strings.TrimLeft(title, titleTrimCutset)
+	appName := appBaseName(exe)
 	for _, sep := range []string{" — ", " – ", " - "} {
-		if i := strings.LastIndex(s, sep); i > 0 {
-			s = s[:i]
-			break
+		i := strings.LastIndex(s, sep)
+		if i <= 0 {
+			continue
 		}
+		suffix := strings.ToLower(strings.TrimSpace(s[i+len(sep):]))
+		if suffix == appName {
+			s = s[:i]
+		}
+		break
 	}
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// appBaseName returns the lower-cased file name of exe without its
+// extension, e.g. `C:\a\Editor.exe` -> "editor".
+func appBaseName(exe string) string {
+	base := filepath.Base(exe)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	return strings.ToLower(base)
 }
 
 // Similarity returns 1 for identical strings and 0 for entirely different
