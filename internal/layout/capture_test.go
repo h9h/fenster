@@ -36,6 +36,9 @@ func TestEligible(t *testing.T) {
 		{"shell WorkerW", live("x", "WorkerW", `C:\Windows\explorer.exe`), false},
 		{"shell tray", live("x", "Shell_TrayWnd", `C:\Windows\explorer.exe`), false},
 		{"shell button", live("Start", "Button", `C:\Windows\explorer.exe`), false},
+		{"zero width rect", func() Live { w := live("Editor", "EditorClass", `C:\a\editor.exe`); w.Rect.W = 0; return w }(), false},
+		{"zero height rect", func() Live { w := live("Editor", "EditorClass", `C:\a\editor.exe`); w.Rect.H = 0; return w }(), false},
+		{"negative width rect", func() Live { w := live("Editor", "EditorClass", `C:\a\editor.exe`); w.Rect.W = -5; return w }(), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

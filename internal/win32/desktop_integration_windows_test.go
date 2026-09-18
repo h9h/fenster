@@ -54,6 +54,39 @@ func TestEnumerationFindsWindowsAndMonitors(t *testing.T) {
 	}
 }
 
+// TestEnumWindowsInfoCallsAreIndependent is the regression pin for hoisting
+// enumWindowsCallback to a package-level var (see desktop_windows.go): each
+// call must see only its own windows, not an accumulation of every previous
+// call's windows. Before the fix, a shared, never-reset collector would have
+// made later calls report roughly double (or triple) the true window count.
+func TestEnumWindowsInfoCallsAreIndependent(t *testing.T) {
+	EnableDPIAwareness()
+
+	counts := make([]int, 3)
+	for i := range counts {
+		windows, err := EnumWindowsInfo()
+		if err != nil {
+			t.Fatalf("EnumWindowsInfo (call %d): %v", i+1, err)
+		}
+		if len(windows) == 0 {
+			t.Fatalf("EnumWindowsInfo (call %d) returned no windows", i+1)
+		}
+		counts[i] = len(windows)
+	}
+
+	// The live window count can drift by a window or two between calls, but
+	// a shared, un-reset collector would make it grow roughly linearly
+	// (2x, 3x, ...) across calls. Guard against that without being flaky
+	// about small, legitimate fluctuations.
+	for i := 1; i < len(counts); i++ {
+		if counts[i] >= 2*counts[0] {
+			t.Errorf("call %d returned %d windows, call 1 returned %d; "+
+				"results look accumulated rather than independent",
+				i+1, counts[i], counts[0])
+		}
+	}
+}
+
 // TestApplyPlacementMovesARealWindow creates a window, moves it, and reads the
 // geometry back.
 func TestApplyPlacementMovesARealWindow(t *testing.T) {

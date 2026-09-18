@@ -2,6 +2,7 @@ package win32
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -38,18 +39,48 @@ func CurrentPID() uint32 {
 	return uint32(pid)
 }
 
+// enumWindowsMu serializes EnumWindowsInfo calls and guards
+// enumWindowsCollector. fenster is a single-threaded UI application (tray
+// icon + popup menus), so this never contends in practice; the mutex exists
+// to make that assumption explicit and safe if it ever stops holding.
+var (
+	enumWindowsMu        sync.Mutex
+	enumWindowsCollector *[]WindowInfo
+)
+
+// enumWindowsCallback is created exactly once for the lifetime of the
+// process. syscall.NewCallback allocates from a small, fixed-size, never-freed
+// table (a few thousand slots); a tray application that called EnumWindows on
+// every menu open (as this one does, via Task 10) would exhaust that table
+// and panic after enough uptime if a fresh callback were minted per call.
+// Per-call state is instead reached through the package-level
+// enumWindowsCollector, guarded by enumWindowsMu, rather than by threading a
+// pointer through EnumWindows' lParam and converting it back with
+// unsafe.Pointer(uintptr(...)) — that reverse conversion is exactly the
+// pattern go vet's unsafeptr check flags as a possible misuse, since it
+// cannot verify from the call site that the uintptr is still a valid,
+// GC-tracked pointer.
+var enumWindowsCallback = syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
+	*enumWindowsCollector = append(*enumWindowsCollector, describeWindow(hwnd))
+	return 1
+})
+
 // EnumWindowsInfo describes every top-level window, without filtering. The
-// caller decides what is eligible (see internal/layout).
+// caller decides what is eligible (see internal/layout). Calls are
+// serialized by enumWindowsMu, so repeated or concurrent calls never see
+// each other's windows.
 func EnumWindowsInfo() ([]WindowInfo, error) {
-	var out []WindowInfo
-	cb := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
-		out = append(out, describeWindow(hwnd))
-		return 1
-	})
-	if ret, _, err := procEnumWindows.Call(cb, 0); ret == 0 {
+	enumWindowsMu.Lock()
+	defer enumWindowsMu.Unlock()
+
+	var windows []WindowInfo
+	enumWindowsCollector = &windows
+	defer func() { enumWindowsCollector = nil }()
+
+	if ret, _, err := procEnumWindows.Call(enumWindowsCallback, 0); ret == 0 {
 		return nil, fmt.Errorf("EnumWindows: %w", err)
 	}
-	return out, nil
+	return windows, nil
 }
 
 func describeWindow(hwnd uintptr) WindowInfo {
@@ -76,6 +107,11 @@ func describeWindow(hwnd uintptr) WindowInfo {
 	info.PID = pid
 	info.Exe = processPath(pid)
 
+	// Default to a normal window before the placement lookup so that a
+	// failure below can never leave info.State as the empty string, which is
+	// not one of store.WindowState's three valid values.
+	info.State = store.StateNormal
+
 	wp := windowPlacement{Length: uint32(unsafe.Sizeof(windowPlacement{}))}
 	if ret, _, _ := procGetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp))); ret != 0 {
 		r := wp.RcNormalPosition
@@ -88,8 +124,28 @@ func describeWindow(hwnd uintptr) WindowInfo {
 		default:
 			info.State = store.StateNormal
 		}
+	} else if wr, ok := windowRect(hwnd); ok {
+		// GetWindowPlacement failed; fall back to the current screen
+		// rectangle so the window still gets a usable, non-zero rect. The
+		// state stays store.StateNormal, set above.
+		info.Rect = wr
 	}
+	// If both calls failed, info.Rect stays its zero value (W == H == 0).
+	// internal/layout.Eligible rejects windows with a non-positive width or
+	// height, so such a window is dropped rather than saved with a bogus
+	// rectangle.
 	return info
+}
+
+// windowRect reads a window's current screen rectangle via GetWindowRect. It
+// is the fallback used when GetWindowPlacement fails.
+func windowRect(hwnd uintptr) (store.Rect, bool) {
+	var r rect
+	ret, _, _ := procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+	if ret == 0 {
+		return store.Rect{}, false
+	}
+	return store.Rect{X: r.Left, Y: r.Top, W: r.Right - r.Left, H: r.Bottom - r.Top}, true
 }
 
 func windowText(hwnd uintptr) string {
@@ -127,28 +183,53 @@ func processPath(pid uint32) string {
 	return syscall.UTF16ToString(buf[:size])
 }
 
-// EnumMonitors returns the current monitor arrangement in physical pixels.
-func EnumMonitors() ([]store.Monitor, error) {
-	var out []store.Monitor
-	cb := syscall.NewCallback(func(hmon, hdc, lprc, data uintptr) uintptr {
-		mi := monitorInfo{CbSize: uint32(unsafe.Sizeof(monitorInfo{}))}
-		if ret, _, _ := procGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi))); ret == 0 {
-			return 1
-		}
-		out = append(out, store.Monitor{
-			X:       mi.RcMonitor.Left,
-			Y:       mi.RcMonitor.Top,
-			W:       mi.RcMonitor.Right - mi.RcMonitor.Left,
-			H:       mi.RcMonitor.Bottom - mi.RcMonitor.Top,
-			Scale:   monitorScale(hmon),
-			Primary: mi.DwFlags&1 != 0,
-		})
+// enumMonitorsMu serializes EnumMonitors calls and guards
+// enumMonitorsCollector, for the same single-threaded-in-practice reason as
+// enumWindowsMu.
+var (
+	enumMonitorsMu        sync.Mutex
+	enumMonitorsCollector *[]store.Monitor
+)
+
+// enumMonitorsCallback is created exactly once for the lifetime of the
+// process, for the same reason as enumWindowsCallback: syscall.NewCallback's
+// backing table is small and never freed, and Task 10 calls EnumMonitors on
+// every tray-menu open. Per-call state is reached through the package-level
+// enumMonitorsCollector, guarded by enumMonitorsMu, rather than through
+// EnumDisplayMonitors' dwData parameter — see enumWindowsCallback's comment
+// for why the dwData/lParam route is avoided (it requires converting a
+// uintptr back to unsafe.Pointer, which go vet's unsafeptr check flags).
+var enumMonitorsCallback = syscall.NewCallback(func(hmon, hdc, lprc, data uintptr) uintptr {
+	mi := monitorInfo{CbSize: uint32(unsafe.Sizeof(monitorInfo{}))}
+	if ret, _, _ := procGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi))); ret == 0 {
 		return 1
+	}
+	*enumMonitorsCollector = append(*enumMonitorsCollector, store.Monitor{
+		X:       mi.RcMonitor.Left,
+		Y:       mi.RcMonitor.Top,
+		W:       mi.RcMonitor.Right - mi.RcMonitor.Left,
+		H:       mi.RcMonitor.Bottom - mi.RcMonitor.Top,
+		Scale:   monitorScale(hmon),
+		Primary: mi.DwFlags&1 != 0,
 	})
-	if ret, _, err := procEnumDisplayMonitors.Call(0, 0, cb, 0); ret == 0 {
+	return 1
+})
+
+// EnumMonitors returns the current monitor arrangement in physical pixels.
+// Calls are serialized by enumMonitorsMu, so repeated or concurrent calls
+// never see each other's monitors.
+func EnumMonitors() ([]store.Monitor, error) {
+	enumMonitorsMu.Lock()
+	defer enumMonitorsMu.Unlock()
+
+	var monitors []store.Monitor
+	enumMonitorsCollector = &monitors
+	defer func() { enumMonitorsCollector = nil }()
+
+	if ret, _, err := procEnumDisplayMonitors.Call(0, 0, enumMonitorsCallback, 0); ret == 0 {
 		return nil, fmt.Errorf("EnumDisplayMonitors: %w", err)
 	}
-	return out, nil
+	return monitors, nil
 }
 
 func monitorScale(hmon uintptr) int {

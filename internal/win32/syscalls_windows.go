@@ -20,6 +20,7 @@ var (
 	procGetWindowLongPtrW          = user32.NewProc("GetWindowLongPtrW")
 	procGetWindowThreadProcessId   = user32.NewProc("GetWindowThreadProcessId")
 	procGetWindowPlacement         = user32.NewProc("GetWindowPlacement")
+	procGetWindowRect              = user32.NewProc("GetWindowRect")
 	procSetWindowPlacement         = user32.NewProc("SetWindowPlacement")
 	procSetWindowPos               = user32.NewProc("SetWindowPos")
 	procEnumDisplayMonitors        = user32.NewProc("EnumDisplayMonitors")

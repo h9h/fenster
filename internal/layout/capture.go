@@ -44,6 +44,11 @@ func Eligible(w Live) bool {
 		return false
 	case shellClasses[w.Class]:
 		return false
+	case w.Rect.W <= 0 || w.Rect.H <= 0:
+		// Both GetWindowPlacement and the GetWindowRect fallback failed in
+		// win32.describeWindow, leaving a zero rectangle. Saving that would
+		// later restore a real window to a 0x0 rect at the origin.
+		return false
 	}
 	return true
 }
