@@ -177,9 +177,81 @@ Then start `.\fenster.exe` and work through the list below.
     and the store is unchanged. *Check*: `layouts.json` is untouched after
     the Escape case.
 
+19. **Assign a hotkey and press it.** Open a layout's submenu and click
+    "Hotkey …". Type `Strg+Alt+1` and confirm. A balloon reads
+    `Hotkey für "<name>": Strg+Alt+1`. Close the menu, then press
+    **Strg+Alt+1**: the same balloon that "Alle wiederherstellen" would show
+    appears (e.g. `<n> Fenster wiederhergestellt`), and the windows move.
+
+20. **Menu reflects the assignment.** Reopen the tray menu. The layout's row
+    shows `Strg+Alt+1` right-aligned (the accelerator column), and its
+    submenu's hotkey entry now reads `Hotkey: Strg+Alt+1 …` instead of
+    `Hotkey …`.
+
+21. **Cancelling or reassigning the same combination changes nothing.** Open
+    "Hotkey …" on the layout from step 19 and press **Escape**: no balloon
+    appears and `layouts.json` is untouched. Open it again, retype
+    `Strg+Alt+1` (the combination it already has) and confirm: again no
+    balloon and no change — re-submitting a layout's own current combination
+    is treated as a no-op, not re-probed as a conflict with itself.
+
+22. **Invalid syntax is rejected.** Open "Hotkey …" and type `F5` (a key with
+    no modifier) and confirm. An error balloon reads
+    `Hotkey: mindestens ein Modifikator (Strg, Alt, Umschalt oder Win) ist
+    nötig`. Try `Strg+Quatsch` instead: the balloon reads
+    `Hotkey: unbekannte Taste "Quatsch"`. In both cases reopening the menu
+    shows the layout's previous binding (or none), unchanged.
+
+23. **Conflicting with another layout of the same setup is refused.** With
+    two layouts saved under the current monitor setup, assign `Strg+Alt+1` to
+    the second one too. The balloon reads
+    `Hotkey: Strg+Alt+1 ist bereits mit "<first layout's name>" belegt`, and
+    reopening the menu shows the second layout still has its previous
+    binding — nothing was written.
+
+24. **A combination another running application already owns is refused.**
+    Start any other application that already registers a global hotkey (or
+    use a small test tool to register one), then try to assign that same
+    combination to a fenster layout. The balloon reads
+    `Hotkey: <combination> wird bereits von einer anderen Anwendung
+    verwendet`, and reopening the menu shows the layout still has its
+    previous binding (nothing was written).
+
+25. **Holding the combination down restores once.** Press and hold an
+    assigned combination for a few seconds instead of tapping it. Exactly one
+    restore happens (one balloon, windows moved once), not one per Windows
+    key-repeat interval.
+
+26. **Assigning a hotkey to a layout under "Andere Setups".** Change the
+    monitor arrangement so an existing layout is filed under "Andere
+    Setups", open its submenu and assign a hotkey. The balloon reads
+    `Hotkey für "<name>": <combination> (aktiv, sobald dieses Setup verwendet
+    wird)`. Pressing that combination now does nothing (the layout's setup is
+    not current, so nothing was registered).
+
+27. **A monitor change switches which hotkeys are live.** With hotkeys
+    assigned to a layout in each of two monitor arrangements, plug or unplug
+    a monitor to switch arrangements. The combination belonging to the setup
+    now in use restores its layout when pressed; the previous setup's
+    combination does nothing until that setup is current again. Reopening
+    the menu also shows the accelerator column move with the switch: it
+    displays for the layout of the setup that is current, not the other one.
+
+28. **A hotkey press while a dialog is open is ignored.** Open "Aktuelles
+    Layout speichern…" and, while the dialog is up, press a combination
+    assigned to a layout. Nothing happens — no restore, no balloon — and the
+    dialog stays usable (typing and OK/Abbrechen still work normally
+    afterwards).
+
+29. **Clearing a hotkey.** Open "Hotkey …" on a layout that has one assigned,
+    delete the text so the field is empty, and confirm. The balloon reads
+    `Hotkey für "<name>" entfernt`. Reopening the menu shows the accelerator
+    column gone from the layout row and the submenu entry back to
+    `Hotkey …`. Pressing the old combination now does nothing.
+
 ## Reporting results
 
 For each item, record pass/fail and, on failure, the relevant excerpt from
-`fenster.log` or the differing part of `layouts.json`. These 18 items are
+`fenster.log` or the differing part of `layouts.json`. These 29 items are
 interactive and cannot be verified by an agent; they require a human with a
 real desktop session and are not covered by `go test`.
