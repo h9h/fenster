@@ -5,7 +5,9 @@ package tray
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
+	"fenster/internal/hotkey"
 	"fenster/internal/layout"
 	"fenster/internal/store"
 )
@@ -20,6 +22,7 @@ const (
 	ActionToggleInclude
 	ActionOverwrite
 	ActionRename
+	ActionHotkey
 	ActionDelete
 	ActionAutostart
 	ActionOpenFolder
@@ -55,6 +58,11 @@ type MenuInput struct {
 	// then always read back as unchecked, so the menu item is greyed out and
 	// forced unchecked instead.
 	AutostartAvailable bool
+	// Unavailable holds the IDs of layouts whose hotkey is currently
+	// refused by Windows because another application owns the combination.
+	// Supplied by the hotkey manager so BuildMenu stays a pure function of
+	// its input rather than querying anything itself.
+	Unavailable map[string]bool
 }
 
 var separator = Item{Separator: true}
@@ -71,11 +79,11 @@ func BuildMenu(in MenuInput) []Item {
 	matching := 0
 	for _, l := range in.Layouts {
 		if l.Setup.Fingerprint == in.CurrentFingerprint {
-			items = append(items, layoutItem(l, in.Live, ""))
+			items = append(items, layoutItem(l, in.Live, "", true, in.Unavailable[l.ID]))
 			matching++
 			continue
 		}
-		others = append(others, layoutItem(l, in.Live, l.Setup.Label))
+		others = append(others, layoutItem(l, in.Live, l.Setup.Label, false, in.Unavailable[l.ID]))
 	}
 
 	if matching == 0 {
@@ -104,9 +112,13 @@ func BuildMenu(in MenuInput) []Item {
 	)
 }
 
-// layoutItem builds the submenu of one layout. suffix carries the setup label
-// for layouts shown under "Andere Setups".
-func layoutItem(l store.Layout, live []layout.Live, suffix string) Item {
+// layoutItem builds the submenu of one layout. suffix carries the setup
+// label for layouts shown under "Andere Setups". current says whether this
+// layout belongs to the monitor setup in use, which decides whether its
+// hotkey is shown on the row itself: a layout under "Andere Setups" has no
+// live registration, and advertising a key that does nothing would be a
+// lie. unavailable marks a hotkey Windows currently refuses.
+func layoutItem(l store.Layout, live []layout.Live, suffix string, current, unavailable bool) Item {
 	present := map[int]bool{}
 	plan := layout.MatchEntries(l.Windows, live)
 	for _, m := range plan.Matches {
@@ -139,12 +151,22 @@ func layoutItem(l store.Layout, live []layout.Live, suffix string) Item {
 		separator,
 		Item{Label: "Mit aktuellem Stand überschreiben", Action: Action{Type: ActionOverwrite, LayoutID: l.ID}},
 		Item{Label: "Umbenennen…", Action: Action{Type: ActionRename, LayoutID: l.ID}},
+		Item{Label: hotkeyEntryLabel(l, unavailable), Action: Action{Type: ActionHotkey, LayoutID: l.ID}},
 		Item{Label: "Löschen", Action: Action{Type: ActionDelete, LayoutID: l.ID}},
 	)
 
 	label := l.Name
 	if suffix != "" {
 		label = fmt.Sprintf("%s (%s)", l.Name, suffix)
+	}
+	// Strip tabs before the accelerator column is appended: a Win32 popup
+	// menu right-aligns everything after the first tab, so a name
+	// containing one could otherwise forge a binding that does not exist.
+	label = strings.ReplaceAll(label, "\t", " ")
+	if current {
+		if acc := hotkeyAccelerator(l, unavailable); acc != "" {
+			label += "\t" + acc
+		}
 	}
 	// Action is still populated on the layout row itself even though it has
 	// children: the model stays a complete description of "what a click on
@@ -192,4 +214,46 @@ func FlattenActions(items []Item) map[uint32]Action {
 	}
 	walk(items)
 	return out
+}
+
+// parsedHotkey is the layout's stored combination, or false when it has
+// none or the stored text does not parse. An unparseable value is simply
+// not shown; internal/hotkey's Active reports it to the log instead, and a
+// menu is the wrong place to explain a malformed file.
+func parsedHotkey(l store.Layout) (hotkey.Hotkey, bool) {
+	if l.Hotkey == "" {
+		return hotkey.Hotkey{}, false
+	}
+	hk, err := hotkey.Parse(l.Hotkey)
+	if err != nil || hk.IsZero() {
+		return hotkey.Hotkey{}, false
+	}
+	return hk, true
+}
+
+// hotkeyAccelerator is what goes into the row's right-aligned accelerator
+// column, empty when there is nothing to show.
+func hotkeyAccelerator(l store.Layout, unavailable bool) string {
+	hk, ok := parsedHotkey(l)
+	if !ok {
+		return ""
+	}
+	if unavailable {
+		return hk.Label() + " (belegt)"
+	}
+	return hk.Label()
+}
+
+// hotkeyEntryLabel is the submenu row that opens the assignment dialog. The
+// trailing ellipsis follows the same convention as "Umbenennen…": this
+// entry opens a dialog rather than acting immediately.
+func hotkeyEntryLabel(l store.Layout, unavailable bool) string {
+	hk, ok := parsedHotkey(l)
+	if !ok {
+		return "Hotkey …"
+	}
+	if unavailable {
+		return fmt.Sprintf("Hotkey: %s (belegt) …", hk.Label())
+	}
+	return fmt.Sprintf("Hotkey: %s …", hk.Label())
 }
