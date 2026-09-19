@@ -4,6 +4,7 @@ package main
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"fenster/internal/autostart"
+	"fenster/internal/hotkey"
 	"fenster/internal/layout"
 	"fenster/internal/monitors"
 	"fenster/internal/store"
@@ -100,12 +102,15 @@ func main() {
 	msgWindow, err := win32.NewMessageWindow("fensterMessageWindow", win32.Callbacks{
 		TrayClick:        app.onTrayClick,
 		TaskbarRecreated: app.onTaskbarRecreated,
+		DisplayChange:    app.onDisplayChange,
+		Hotkey:           app.onHotkey,
 	})
 	if err != nil {
 		win32.Alert("fenster", fmt.Sprintf("Anwendungsfenster konnte nicht erzeugt werden:\n%v", err))
 		return
 	}
 	app.msgWindow = msgWindow
+	app.hotkeys = newHotkeyManager(windowHotkeys{hwnd: msgWindow.Handle()})
 
 	trayIcon, err := win32.NewTrayIcon(msgWindow.Handle(), iconHandle, "fenster")
 	if err != nil {
@@ -120,6 +125,11 @@ func main() {
 			recoveredPath))
 	}
 
+	// Register the hotkeys of the setup we are starting on. Deliberately
+	// after the tray icon exists: a combination already taken by another
+	// application is reported by balloon, and a balloon needs an icon.
+	app.syncHotkeys()
+
 	msgWindow.Run()
 }
 
@@ -131,15 +141,19 @@ type application struct {
 	exePath   string
 	msgWindow *win32.MessageWindow
 	trayIcon  *win32.TrayIcon
+	hotkeys   *hotkeyManager
 
-	// busy is a re-entrancy guard for onTrayClick. InputBox's nested message
-	// loop pumps every message on the thread, including the tray icon's own
-	// wmTrayIcon, so a click on the tray icon while a dialog (or any other
-	// action) is already in progress would otherwise dispatch straight back
-	// into onTrayClick and open a second menu on top of the first — which,
-	// for InputBox specifically, orphaned the outer dialog outright. Setting
-	// this on entry and clearing it via defer makes such a re-entrant click
-	// a no-op instead.
+	// busy is a re-entrancy guard for onTrayClick and onHotkey. InputBox's
+	// nested message loop pumps every message on the thread, including the
+	// tray icon's own wmTrayIcon and WM_HOTKEY, so a click or a hotkey press
+	// while a dialog (or any other action) is already in progress would
+	// otherwise dispatch straight back in and open a second menu, or a
+	// second restore, on top of the first — which, for InputBox
+	// specifically, orphaned the outer dialog outright. Setting this on
+	// entry and clearing it via defer makes such a re-entrant call a no-op
+	// instead. onDisplayChange deliberately ignores this guard: a sync
+	// touches no UI and must not be skipped just because a menu happens to
+	// be open.
 	busy bool
 }
 
@@ -169,6 +183,69 @@ func (a *application) onTaskbarRecreated() {
 	if err := a.trayIcon.Readd(); err != nil {
 		log.Printf("TrayIcon.Readd after TaskbarCreated: %v", err)
 	}
+}
+
+// syncHotkeys re-registers the global hotkeys for the monitor setup in use
+// right now. It is called at startup, after every store mutation and on
+// every display change; a sync costs a handful of syscalls, which is why
+// there is no list of "mutations that do not need one" — such a list is a
+// list a future mutation gets added to the wrong side of.
+func (a *application) syncHotkeys() {
+	if a.hotkeys == nil {
+		return
+	}
+	mons, err := win32.EnumMonitors()
+	if err != nil {
+		// Without the monitor list there is no fingerprint and therefore no
+		// way to tell which hotkeys should be live. Leaving the previous
+		// registrations in place is the better failure: they were right a
+		// moment ago.
+		log.Printf("syncHotkeys: EnumMonitors: %v", err)
+		return
+	}
+	if newly := a.hotkeys.sync(a.store.Layouts(), monitors.Fingerprint(mons)); newly > 0 {
+		a.notify(unavailableMessage(newly))
+	}
+}
+
+// onDisplayChange re-registers hotkeys after the monitor arrangement
+// changed, so the layouts of the setup now in use take over. It ignores the
+// busy guard on purpose: a sync touches no UI and must not be skipped just
+// because a menu happens to be open.
+func (a *application) onDisplayChange() {
+	a.syncHotkeys()
+}
+
+// onHotkey restores the layout behind a pressed global hotkey. It runs the
+// same actionRestore the menu's "Alle wiederherstellen" runs — not a copy
+// of it — so a hotkey restore cannot drift from a menu restore in matching,
+// clamping, deselected windows or the balloon it shows.
+func (a *application) onHotkey(id int32) {
+	if a.busy {
+		return
+	}
+	a.busy = true
+	defer func() { a.busy = false }()
+
+	layoutID, ok := a.hotkeys.layoutFor(id)
+	if !ok {
+		// A press that arrived after the sync that unregistered its hotkey.
+		// Windows allows that race; it is nothing to alarm the user about.
+		log.Printf("WM_HOTKEY for unknown id %d", id)
+		return
+	}
+
+	infos, err := win32.EnumWindowsInfo()
+	if err != nil {
+		a.reportError("Fenster konnten nicht ermittelt werden", err)
+		return
+	}
+	mons, err := win32.EnumMonitors()
+	if err != nil {
+		a.reportError("Monitore konnten nicht ermittelt werden", err)
+		return
+	}
+	a.actionRestore(layoutID, mons, toLive(infos))
 }
 
 // onTrayClick builds and shows the tray menu, dispatches whatever the user
@@ -225,6 +302,7 @@ func (a *application) showMenuOnce() (reopen bool) {
 		Layouts:            a.store.Layouts(),
 		CurrentFingerprint: fingerprint,
 		Live:               live,
+		Unavailable:        a.hotkeys.unavailableIDs(),
 		AutostartOn:        autostartOn,
 		AutostartAvailable: autostartAvailable,
 	})
@@ -251,11 +329,13 @@ func (a *application) dispatch(action tray.Action, mons []store.Monitor, live []
 	case tray.ActionRestore:
 		a.actionRestore(action.LayoutID, mons, live)
 	case tray.ActionToggleInclude:
-		return a.actionToggleInclude(action.LayoutID, action.WindowIdx)
+		reopen = a.actionToggleInclude(action.LayoutID, action.WindowIdx)
 	case tray.ActionOverwrite:
 		a.actionOverwrite(action.LayoutID, mons, live)
 	case tray.ActionRename:
 		a.actionRename(action.LayoutID)
+	case tray.ActionHotkey:
+		a.actionHotkey(action.LayoutID)
 	case tray.ActionDelete:
 		a.actionDelete(action.LayoutID)
 	case tray.ActionAutostart:
@@ -270,7 +350,15 @@ func (a *application) dispatch(action tray.Action, mons []store.Monitor, live []
 		// model without a matching case here does not vanish without a trace.
 		log.Printf("dispatch: unhandled action type %v", action.Type)
 	}
-	return false
+	// Re-register after every action rather than after a curated list of
+	// the mutating ones: a sync is a handful of syscalls, and a curated
+	// list is where the next action gets filed on the wrong side. Quit is
+	// the one exception — actionQuit has already released everything, and
+	// re-registering on the way out would undo that.
+	if action.Type != tray.ActionQuit {
+		a.syncHotkeys()
+	}
+	return reopen
 }
 
 func (a *application) actionSave(mons []store.Monitor, live []layout.Live) {
@@ -451,6 +539,94 @@ func (a *application) actionRename(id string) {
 	a.notify(fmt.Sprintf("Layout umbenannt in %q", name))
 }
 
+// actionHotkey assigns, changes or clears one layout's hotkey. The
+// registration is attempted before anything is persisted, so a combination
+// Windows will not grant never reaches layouts.json.
+func (a *application) actionHotkey(id string) {
+	l, ok := a.store.Get(id)
+	if !ok {
+		a.reportError("Hotkey konnte nicht geändert werden", fmt.Errorf("Layout %q nicht gefunden", id))
+		return
+	}
+	current, _ := hotkey.Parse(l.Hotkey) // an unparseable stored value prefills as empty
+
+	text, ok := win32.InputBox("Hotkey", "Tastenkombination:", current.Label())
+	if !ok {
+		return
+	}
+	hk, err := hotkey.Parse(strings.TrimSpace(text))
+	if err != nil {
+		a.reportError("Hotkey", err)
+		return
+	}
+	// Nothing would change. Worth its own branch rather than falling
+	// through: re-probing a combination this layout already holds would
+	// collide with fenster's own registration and be reported as "another
+	// application owns it". Comparing the canonical text too, not just the
+	// parsed value, means clearing an unparseable stored value still counts
+	// as a change and is written.
+	if hk == current && hk.Canonical() == l.Hotkey {
+		return
+	}
+
+	if !hk.IsZero() {
+		if other, dup := hotkey.Conflict(a.store.Layouts(), l.Setup.Fingerprint, hk, l.ID); dup {
+			a.reportError("Hotkey", fmt.Errorf("%s ist bereits mit %q belegt", hk.Label(), other.Name))
+			return
+		}
+	}
+
+	// Whether the combination can actually be granted is only answerable
+	// while this layout's setup is the current one — that is the only time
+	// its hotkey is live. For a layout under "Andere Setups" the check is
+	// deferred to the sync that happens when that setup returns.
+	mons, err := win32.EnumMonitors()
+	if err != nil {
+		a.reportError("Monitore konnten nicht ermittelt werden", err)
+		return
+	}
+	isCurrentSetup := l.Setup.Fingerprint == monitors.Fingerprint(mons)
+
+	if !hk.IsZero() && isCurrentSetup {
+		if err := win32.RegisterHotKey(a.msgWindow.Handle(), hotkeyProbeID, win32Mods(hk.Mods), hk.Key); err != nil {
+			if errors.Is(err, win32.ErrHotkeyInUse) {
+				a.reportError("Hotkey", fmt.Errorf("%s wird bereits von einer anderen Anwendung verwendet", hk.Label()))
+			} else {
+				a.reportError("Hotkey konnte nicht registriert werden", err)
+			}
+			return
+		}
+		if err := win32.UnregisterHotKey(a.msgWindow.Handle(), hotkeyProbeID); err != nil {
+			log.Printf("UnregisterHotKey(probe): %v", err)
+		}
+	}
+
+	old := l
+	l.Hotkey = hk.Canonical()
+	l.Updated = time.Now()
+
+	if err := a.store.Replace(id, l); err != nil {
+		a.reportError("Hotkey konnte nicht geändert werden", err)
+		return
+	}
+	if err := a.store.Save(); err != nil {
+		if rbErr := a.store.Replace(id, old); rbErr != nil { // roll back
+			log.Printf("rollback hotkey %q after failed save: %v", id, rbErr)
+		}
+		a.reportError("Hotkey konnte nicht gespeichert werden", err)
+		return
+	}
+
+	switch {
+	case hk.IsZero():
+		a.notify(fmt.Sprintf("Hotkey für %q entfernt", l.Name))
+	case isCurrentSetup:
+		a.notify(fmt.Sprintf("Hotkey für %q: %s", l.Name, hk.Label()))
+	default:
+		a.notify(fmt.Sprintf("Hotkey für %q: %s (aktiv, sobald dieses Setup verwendet wird)", l.Name, hk.Label()))
+	}
+}
+
 func (a *application) actionDelete(id string) {
 	l, ok := a.store.Get(id)
 	if !ok {
@@ -537,6 +713,11 @@ func (a *application) actionOpenFolder() {
 }
 
 func (a *application) actionQuit() {
+	// Windows releases a process's hotkeys when it exits, so this is
+	// belt-and-braces; it costs nothing and keeps the lifecycle symmetric.
+	if a.hotkeys != nil {
+		a.hotkeys.sync(nil, "")
+	}
 	if err := a.trayIcon.Remove(); err != nil {
 		log.Printf("TrayIcon.Remove: %v", err)
 	}

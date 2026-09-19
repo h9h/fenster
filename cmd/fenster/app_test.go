@@ -86,3 +86,18 @@ func TestRestoreMessage(t *testing.T) {
 		}
 	}
 }
+
+func TestUnavailableMessage(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{1, "Ein Hotkey ist belegt und derzeit ohne Funktion"},
+		{3, "3 Hotkeys sind belegt und derzeit ohne Funktion"},
+	}
+	for _, tc := range tests {
+		if got := unavailableMessage(tc.n); got != tc.want {
+			t.Errorf("unavailableMessage(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}

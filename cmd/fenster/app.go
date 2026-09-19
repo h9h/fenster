@@ -50,3 +50,14 @@ func restoreMessage(restored, deselected, missing, failed int) string {
 	}
 	return b.String()
 }
+
+// unavailableMessage is the balloon shown when a sync finds combinations
+// Windows will not grant. It counts layouts, not key presses, and is only
+// shown for hotkeys that became unavailable since the last sync — a
+// standing conflict is not worth a balloon on every menu click.
+func unavailableMessage(n int) string {
+	if n == 1 {
+		return "Ein Hotkey ist belegt und derzeit ohne Funktion"
+	}
+	return fmt.Sprintf("%d Hotkeys sind belegt und derzeit ohne Funktion", n)
+}
