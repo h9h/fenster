@@ -64,9 +64,15 @@ type Callbacks struct {
 	Hotkey func(id int32)
 }
 
-// MessageWindow is a hidden, message-only top-level window used to receive
+// MessageWindow is a hidden, never-shown top-level window used to receive
 // tray icon callbacks, global hotkey presses, display changes and the
-// WM_DESTROY that ends the application's message loop.
+// WM_DESTROY that ends the application's message loop. NewMessageWindow
+// creates it with hWndParent = 0, a genuine top-level window, not
+// HWND_MESSAGE (a true message-only window): Windows broadcasts
+// WM_DISPLAYCHANGE only to top-level windows, so a message-only window
+// would never receive it, silently killing the display-change re-sync
+// while hotkeys kept working, with no error and no log line. Do not
+// "fix" this into HWND_MESSAGE.
 type MessageWindow struct {
 	hwnd      uintptr
 	hInstance uintptr

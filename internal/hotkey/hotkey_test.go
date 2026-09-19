@@ -74,10 +74,10 @@ func TestParseEmptyIsNoHotkey(t *testing.T) {
 
 func TestParseRejections(t *testing.T) {
 	for _, in := range []string{
-		"F5",          // no modifier at all
-		"Strg",        // no key
-		"Strg+Alt",    // still no key
-		"Strg+A+B",    // two non-modifier keys
+		"F5",           // no modifier at all
+		"Strg",         // no key
+		"Strg+Alt",     // still no key
+		"Strg+A+B",     // two non-modifier keys
 		"Strg+Zwiebel", // unknown key
 	} {
 		if got, err := Parse(in); err == nil {
@@ -99,13 +99,33 @@ func TestFormatting(t *testing.T) {
 	}
 }
 
-func TestFormatParseRoundTrip(t *testing.T) {
+func TestFormatParseRoundTripModifiers(t *testing.T) {
 	for _, h := range []Hotkey{
 		{Mods: ModCtrl, Key: 0x41},
 		{Mods: ModCtrl | ModAlt, Key: 0x31},
 		{Mods: ModWin | ModShift, Key: 0x25},
 		{Mods: ModAlt, Key: 0x87},
 	} {
+		for _, s := range []string{h.Canonical(), h.Label()} {
+			back, err := Parse(s)
+			if err != nil {
+				t.Fatalf("Parse(%q): unexpected error %v", s, err)
+			}
+			if back != h {
+				t.Errorf("Parse(%q) = %+v, want %+v", s, back, h)
+			}
+		}
+	}
+}
+
+// TestFormatParseRoundTripNamedKeys drives the round trip from namedKeys
+// itself, rather than from a hand-picked subset, so every named key is
+// checked in both its Canonical() (English, ASCII) and Label() (German,
+// sometimes non-ASCII, e.g. Bild↑/Bild↓) forms, and a future table entry
+// cannot be added without gaining round-trip coverage automatically.
+func TestFormatParseRoundTripNamedKeys(t *testing.T) {
+	for _, k := range namedKeys {
+		h := Hotkey{Mods: ModCtrl, Key: k.vk}
 		for _, s := range []string{h.Canonical(), h.Label()} {
 			back, err := Parse(s)
 			if err != nil {

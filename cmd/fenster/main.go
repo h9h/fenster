@@ -151,9 +151,14 @@ type application struct {
 	// second restore, on top of the first — which, for InputBox
 	// specifically, orphaned the outer dialog outright. Setting this on
 	// entry and clearing it via defer makes such a re-entrant call a no-op
-	// instead. onDisplayChange deliberately ignores this guard: a sync
-	// touches no UI and must not be skipped just because a menu happens to
-	// be open.
+	// instead. onDisplayChange deliberately ignores this guard — not
+	// because the sync it triggers touches no UI (it can show a balloon via
+	// notify), but because nothing on the sync path (EnumMonitors,
+	// store.Layouts, RegisterHotKey/UnregisterHotKey, Shell_NotifyIconW)
+	// pumps the thread's message queue the way InputBox and Menu.Track do,
+	// so onDisplayChange cannot nest a second dialog or menu even while one
+	// is already open. Adding anything modal (win32.Alert or similar) to
+	// the sync path would break that and needs this guard revisited.
 	busy bool
 }
 
@@ -210,8 +215,16 @@ func (a *application) syncHotkeys() {
 
 // onDisplayChange re-registers hotkeys after the monitor arrangement
 // changed, so the layouts of the setup now in use take over. It ignores the
-// busy guard on purpose: a sync touches no UI and must not be skipped just
-// because a menu happens to be open.
+// busy guard on purpose — not because syncHotkeys touches no UI (it does,
+// via notify's balloon), but because nothing it calls (EnumMonitors,
+// store.Layouts, RegisterHotKey/UnregisterHotKey, Shell_NotifyIconW) pumps
+// the thread's message queue, unlike InputBox and Menu.Track, which pump
+// everything and can in fact deliver WM_DISPLAYCHANGE into this very
+// function mid-dialog. Because this call itself never pumps, it cannot
+// nest a second dialog or a second menu on top of whatever busy is already
+// guarding. If the sync path ever grows a call that does pump (win32.Alert
+// or any other modal), that call could re-enter and this reasoning — and
+// the guard it justifies — would need to be revisited.
 func (a *application) onDisplayChange() {
 	a.syncHotkeys()
 }
@@ -226,6 +239,14 @@ func (a *application) onHotkey(id int32) {
 	}
 	a.busy = true
 	defer func() { a.busy = false }()
+
+	if a.hotkeys == nil {
+		// Cannot happen in practice: no message pump runs before main
+		// assigns this field. Guarded anyway because this runs from
+		// syscall.NewCallback, where a nil dereference panics and takes the
+		// tray icon down with the whole process.
+		return
+	}
 
 	layoutID, ok := a.hotkeys.layoutFor(id)
 	if !ok {
@@ -298,11 +319,21 @@ func (a *application) showMenuOnce() (reopen bool) {
 		}
 	}
 
+	// Guarded the same way as onHotkey: unreachable before main assigns
+	// a.hotkeys, but this too runs from syscall.NewCallback, where a nil
+	// dereference would panic and take the tray icon down with it. A nil
+	// map is a safe, empty Unavailable for BuildMenu — reading from it
+	// never panics.
+	var unavailable map[string]bool
+	if a.hotkeys != nil {
+		unavailable = a.hotkeys.unavailableIDs()
+	}
+
 	items := tray.BuildMenu(tray.MenuInput{
 		Layouts:            a.store.Layouts(),
 		CurrentFingerprint: fingerprint,
 		Live:               live,
-		Unavailable:        a.hotkeys.unavailableIDs(),
+		Unavailable:        unavailable,
 		AutostartOn:        autostartOn,
 		AutostartAvailable: autostartAvailable,
 	})
@@ -588,16 +619,13 @@ func (a *application) actionHotkey(id string) {
 	isCurrentSetup := l.Setup.Fingerprint == monitors.Fingerprint(mons)
 
 	if !hk.IsZero() && isCurrentSetup {
-		if err := win32.RegisterHotKey(a.msgWindow.Handle(), hotkeyProbeID, win32Mods(hk.Mods), hk.Key); err != nil {
+		if err := a.hotkeys.probe(win32Mods(hk.Mods), hk.Key); err != nil {
 			if errors.Is(err, win32.ErrHotkeyInUse) {
 				a.reportError("Hotkey", fmt.Errorf("%s wird bereits von einer anderen Anwendung verwendet", hk.Label()))
 			} else {
 				a.reportError("Hotkey konnte nicht registriert werden", err)
 			}
 			return
-		}
-		if err := win32.UnregisterHotKey(a.msgWindow.Handle(), hotkeyProbeID); err != nil {
-			log.Printf("UnregisterHotKey(probe): %v", err)
 		}
 	}
 

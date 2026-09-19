@@ -65,6 +65,13 @@ type hotkeyManager struct {
 	backend     hotkeyBackend
 	registered  map[int32]string // registration id -> layout ID, successes only
 	unavailable map[string]bool  // layout IDs whose registration is currently refused
+
+	// probeReleasePending records that a probe registration (see probe)
+	// could not be released again. It must not be forgotten about: id 0 is
+	// never part of registered, so nothing in sync's normal unregister loop
+	// would ever retry it, and the combination would stay registered to
+	// this process for the rest of its lifetime otherwise.
+	probeReleasePending bool
 }
 
 func newHotkeyManager(b hotkeyBackend) *hotkeyManager {
@@ -85,6 +92,31 @@ func (m *hotkeyManager) layoutFor(id int32) (string, bool) {
 // registered, for the menu's "(belegt)" marker.
 func (m *hotkeyManager) unavailableIDs() map[string]bool { return m.unavailable }
 
+// probe tests whether Windows will grant mods+vk, without persisting
+// anything: it registers the combination under hotkeyProbeID and
+// immediately unregisters it again. A failure to register is returned
+// as-is, so the caller can tell ErrHotkeyInUse (another application owns
+// it) apart from any other failure with errors.Is, exactly as sync does.
+//
+// A failure to *release* the probe is not returned — the probe already
+// answered the only question actionHotkey asked it — but it is not
+// forgotten either: it is logged and recorded in probeReleasePending, and
+// the top of sync retries it on every subsequent sync until it succeeds.
+// Without that retry, a failed release here would hold hotkeyProbeID for
+// the rest of the process's lifetime, and every later probe of a different
+// combination would spuriously see it as still granted or, worse, silently
+// clobber its registration.
+func (m *hotkeyManager) probe(mods, vk uint32) error {
+	if err := m.backend.Register(hotkeyProbeID, mods, vk); err != nil {
+		return err
+	}
+	if err := m.backend.Unregister(hotkeyProbeID); err != nil {
+		log.Printf("UnregisterHotKey(probe): %v", err)
+		m.probeReleasePending = true
+	}
+	return nil
+}
+
 // sync makes the registered set match the layouts of the given setup: it
 // unregisters everything and registers the desired set from scratch. A full
 // re-sync rather than an incremental diff because registering a couple of
@@ -98,6 +130,14 @@ func (m *hotkeyManager) unavailableIDs() map[string]bool { return m.unavailable 
 // can balloon once instead of once per hotkey, and not again on every
 // later sync.
 func (m *hotkeyManager) sync(layouts []store.Layout, fingerprint string) int {
+	if m.probeReleasePending {
+		if err := m.backend.Unregister(hotkeyProbeID); err != nil {
+			log.Printf("UnregisterHotKey(probe retry): %v", err)
+		} else {
+			m.probeReleasePending = false
+		}
+	}
+
 	for id := range m.registered {
 		if err := m.backend.Unregister(id); err != nil {
 			log.Printf("UnregisterHotKey(%d): %v", id, err)

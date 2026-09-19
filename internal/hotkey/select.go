@@ -41,6 +41,11 @@ func Active(layouts []store.Layout, fingerprint string) ([]Binding, []error) {
 			continue
 		}
 		if hk.IsZero() {
+			// Not unreachable: l.Hotkey == "" above does not catch a
+			// whitespace-only stored value, and Parse("   ") returns the
+			// zero Hotkey with a nil error. A hand-edited
+			// "hotkey": "   " reaches this branch and must be treated as
+			// "no hotkey", same as an empty string.
 			continue
 		}
 		if firstID, dup := seen[hk]; dup {

@@ -17,13 +17,9 @@ func TestTrayMenuSmoke(t *testing.T) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 
 	className := fmt.Sprintf("fensterTrayTest%d", uintptr(unsafe.Pointer(&hInstance)))
-	hotkeyIDs := make(chan int32, 1)
-	displayChanges := make(chan struct{}, 1)
 	mw, err := NewMessageWindow(className, Callbacks{
 		TrayClick:        func() {},
 		TaskbarRecreated: func() {},
-		DisplayChange:    func() { displayChanges <- struct{}{} },
-		Hotkey:           func(id int32) { hotkeyIDs <- id },
 	})
 	if err != nil {
 		t.Fatalf("NewMessageWindow: %v", err)

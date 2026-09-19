@@ -100,8 +100,10 @@ combination (if any). Accepted syntax:
 
 - Modifiers: `Strg`/`Ctrl`/`Control`/`Steuerung`, `Alt`, `Umschalt`/`Shift`,
   `Win`/`Windows`.
-- Keys: `A`–`Z`, `0`–`9`, `F1`–`F24`, the arrow keys, `Pos1`, `Ende`, `Bild↑`,
-  `Bild↓`, `Einfg`, `Entf`, `Leertaste`, `Esc`, `Tab`, `Eingabe`.
+- Keys: `A`–`Z`, `0`–`9`, `F1`–`F24`, the arrow keys, `Pos1`, `Ende`,
+  `Bild↑`/`BildAuf`/`BildHoch`/`PageUp`, `Bild↓`/`BildAb`/`BildRunter`/
+  `PageDown`, `Einfg`/`Insert`, `Entf`/`Delete`/`Del`, `Leertaste`/`Space`,
+  `Esc`/`Escape`, `Tab`, `Eingabe`/`Enter`/`Return`.
 - Tokens may be separated by `+`, `-` or spaces, and spelling is
   case-insensitive.
 
