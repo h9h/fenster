@@ -45,15 +45,41 @@ func putUTF16(dst []uint16, s string) {
 	dst[len(dst)-1] = 0
 }
 
+// Callbacks are the events a MessageWindow reports to its owner. Every one
+// is invoked from inside Run's DispatchMessageW — that is, on the owner's
+// own goroutine, the one locked to this thread — and a nil field means the
+// message is ignored. A named struct rather than positional parameters
+// because a reader of the call site should not have to count func()
+// arguments to work out which is which.
+type Callbacks struct {
+	// TrayClick fires on a left- or right-button-up on the tray icon.
+	TrayClick func()
+	// TaskbarRecreated fires when Explorer restarts and rebuilds the
+	// notification area; the owner must re-add its tray icon.
+	TaskbarRecreated func()
+	// DisplayChange fires when the display resolution or arrangement
+	// changes, which can change which saved layouts match the current setup.
+	DisplayChange func()
+	// Hotkey fires with the registration id of a pressed global hotkey.
+	Hotkey func(id int32)
+}
+
 // MessageWindow is a hidden, message-only top-level window used to receive
-// tray icon callbacks and the WM_DESTROY that ends the application's message
-// loop.
+// tray icon callbacks, global hotkey presses, display changes and the
+// WM_DESTROY that ends the application's message loop.
 type MessageWindow struct {
-	hwnd               uintptr
-	hInstance          uintptr
-	classPtr           *uint16
-	onTrayClick        func()
-	onTaskbarRecreated func()
+	hwnd      uintptr
+	hInstance uintptr
+	classPtr  *uint16
+	cb        Callbacks
+}
+
+// lookupMessageWindow resolves the instance that owns hwnd. Every branch of
+// messageWindowProc goes through it rather than repeating the mutex dance.
+func lookupMessageWindow(hwnd uintptr) *MessageWindow {
+	msgWndMu.Lock()
+	defer msgWndMu.Unlock()
+	return msgWndState[hwnd]
 }
 
 // taskbarCreatedMsg is the id Windows assigns to the "TaskbarCreated"
@@ -99,25 +125,34 @@ var messageWindowProc = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintp
 	// wrongly fire on WM_NULL, which Menu.Track posts to this very window on
 	// every close.
 	if taskbarCreatedMsg != 0 && msg == taskbarCreatedMsg {
-		msgWndMu.Lock()
-		mw := msgWndState[hwnd]
-		msgWndMu.Unlock()
-		if mw != nil && mw.onTaskbarRecreated != nil {
-			mw.onTaskbarRecreated()
+		if mw := lookupMessageWindow(hwnd); mw != nil && mw.cb.TaskbarRecreated != nil {
+			mw.cb.TaskbarRecreated()
 		}
 		return 0
 	}
 	switch msg {
 	case wmTrayIcon:
 		if lparam == wmRightButtonUp || lparam == wmLeftButtonUp {
-			msgWndMu.Lock()
-			mw := msgWndState[hwnd]
-			msgWndMu.Unlock()
-			if mw != nil && mw.onTrayClick != nil {
-				mw.onTrayClick()
+			if mw := lookupMessageWindow(hwnd); mw != nil && mw.cb.TrayClick != nil {
+				mw.cb.TrayClick()
 			}
 		}
 		return 0
+	case wmHotkey:
+		// The registration id is the low word of wParam; the high word
+		// repeats the modifiers and key, which the owner already knows from
+		// the id.
+		if mw := lookupMessageWindow(hwnd); mw != nil && mw.cb.Hotkey != nil {
+			mw.cb.Hotkey(int32(wparam & 0xFFFF))
+		}
+		return 0
+	case wmDisplayChange:
+		if mw := lookupMessageWindow(hwnd); mw != nil && mw.cb.DisplayChange != nil {
+			mw.cb.DisplayChange()
+		}
+		// No return: WM_DISPLAYCHANGE is passed on to DefWindowProcW below,
+		// as Windows expects for a message it broadcasts to every top-level
+		// window.
 	case wmDestroy:
 		msgWndMu.Lock()
 		delete(msgWndState, hwnd)
@@ -130,14 +165,12 @@ var messageWindowProc = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintp
 })
 
 // NewMessageWindow registers className as a window class and creates a
-// never-shown top-level window of that class. onTrayClick is invoked (from
-// inside Run's DispatchMessageW, i.e. on the caller's own goroutine) whenever
-// the tray icon receives a left- or right-button-up click. onTaskbarRecreated
-// is invoked the same way whenever Explorer restarts and rebuilds the
-// notification area (see taskbarCreatedMsg); it is the caller's job to
-// re-add its own tray icon there, since MessageWindow is created before the
-// TrayIcon that will need re-adding exists.
-func NewMessageWindow(className string, onTrayClick func(), onTaskbarRecreated func()) (*MessageWindow, error) {
+// never-shown top-level window of that class. The events it reports are
+// described on Callbacks; all of them arrive from inside Run's
+// DispatchMessageW, i.e. on the caller's own goroutine. TaskbarRecreated
+// exists because MessageWindow is created before the TrayIcon that will
+// need re-adding, so re-adding is the caller's job, not this type's.
+func NewMessageWindow(className string, cb Callbacks) (*MessageWindow, error) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 
 	classPtr, err := syscall.UTF16PtrFromString(className)
@@ -178,11 +211,10 @@ func NewMessageWindow(className string, onTrayClick func(), onTaskbarRecreated f
 	}
 
 	mw := &MessageWindow{
-		hwnd:               hwnd,
-		hInstance:          hInstance,
-		classPtr:           classPtr,
-		onTrayClick:        onTrayClick,
-		onTaskbarRecreated: onTaskbarRecreated,
+		hwnd:      hwnd,
+		hInstance: hInstance,
+		classPtr:  classPtr,
+		cb:        cb,
 	}
 	msgWndMu.Lock()
 	msgWndState[hwnd] = mw

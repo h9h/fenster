@@ -17,7 +17,14 @@ func TestTrayMenuSmoke(t *testing.T) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 
 	className := fmt.Sprintf("fensterTrayTest%d", uintptr(unsafe.Pointer(&hInstance)))
-	mw, err := NewMessageWindow(className, func() {}, func() {})
+	hotkeyIDs := make(chan int32, 1)
+	displayChanges := make(chan struct{}, 1)
+	mw, err := NewMessageWindow(className, Callbacks{
+		TrayClick:        func() {},
+		TaskbarRecreated: func() {},
+		DisplayChange:    func() { displayChanges <- struct{}{} },
+		Hotkey:           func(id int32) { hotkeyIDs <- id },
+	})
 	if err != nil {
 		t.Fatalf("NewMessageWindow: %v", err)
 	}
@@ -137,4 +144,43 @@ func menuItemText(t *testing.T, hmenu uintptr, id uint32) string {
 		t.Fatalf("GetMenuStringW(id=%d): %v", id, err)
 	}
 	return syscall.UTF16ToString(buf[:n])
+}
+
+// TestMessageWindowRoutesHotkeyAndDisplayChange sends the two new messages
+// to the window procedure directly, rather than waiting for a real key
+// press or a real monitor being unplugged, and asserts they reach the
+// right callback with the right payload.
+func TestMessageWindowRoutesHotkeyAndDisplayChange(t *testing.T) {
+	hInstance, _, _ := procGetModuleHandleW.Call(0)
+	className := fmt.Sprintf("fensterRouteTest%d", uintptr(unsafe.Pointer(&hInstance)))
+
+	gotHotkey := make(chan int32, 1)
+	gotDisplay := make(chan struct{}, 1)
+	mw, err := NewMessageWindow(className, Callbacks{
+		DisplayChange: func() { gotDisplay <- struct{}{} },
+		Hotkey:        func(id int32) { gotHotkey <- id },
+	})
+	if err != nil {
+		t.Fatalf("NewMessageWindow: %v", err)
+	}
+	defer mw.Quit()
+
+	// SendMessageW dispatches synchronously to the window procedure on this
+	// thread, so no message loop has to be running for this to arrive.
+	procSendMessageW.Call(mw.Handle(), uintptr(wmHotkey), 7, 0)
+	select {
+	case id := <-gotHotkey:
+		if id != 7 {
+			t.Errorf("Hotkey callback got id %d, want 7", id)
+		}
+	default:
+		t.Error("Hotkey callback was not invoked")
+	}
+
+	procSendMessageW.Call(mw.Handle(), uintptr(wmDisplayChange), 0, 0)
+	select {
+	case <-gotDisplay:
+	default:
+		t.Error("DisplayChange callback was not invoked")
+	}
 }

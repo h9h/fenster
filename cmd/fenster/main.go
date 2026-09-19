@@ -97,7 +97,10 @@ func main() {
 		exePath:   exePath,
 	}
 
-	msgWindow, err := win32.NewMessageWindow("fensterMessageWindow", app.onTrayClick, app.onTaskbarRecreated)
+	msgWindow, err := win32.NewMessageWindow("fensterMessageWindow", win32.Callbacks{
+		TrayClick:        app.onTrayClick,
+		TaskbarRecreated: app.onTaskbarRecreated,
+	})
 	if err != nil {
 		win32.Alert("fenster", fmt.Sprintf("Anwendungsfenster konnte nicht erzeugt werden:\n%v", err))
 		return

@@ -22,7 +22,7 @@ func TestRegisterHotKeySmoke(t *testing.T) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	className := fmt.Sprintf("fensterHotkeyTest%d", uintptr(unsafe.Pointer(&hInstance)))
 
-	mw, err := NewMessageWindow(className, func() {}, func() {})
+	mw, err := NewMessageWindow(className, Callbacks{})
 	if err != nil {
 		t.Fatalf("NewMessageWindow: %v", err)
 	}
