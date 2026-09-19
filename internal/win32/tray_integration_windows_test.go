@@ -166,8 +166,11 @@ func TestMessageWindowRoutesHotkeyAndDisplayChange(t *testing.T) {
 	defer mw.Quit()
 
 	// SendMessageW dispatches synchronously to the window procedure on this
-	// thread, so no message loop has to be running for this to arrive.
-	procSendMessageW.Call(mw.Handle(), uintptr(wmHotkey), 7, 0)
+	// thread, so no message loop has to be running for this to arrive. The
+	// high word of wParam is set to a nonzero value (0x0007) so that a
+	// missing "& 0xFFFF" mask on extraction would yield 0x00070007 instead
+	// of 7, and the assertion below would catch it.
+	procSendMessageW.Call(mw.Handle(), uintptr(wmHotkey), 0x00070000|7, 0)
 	select {
 	case id := <-gotHotkey:
 		if id != 7 {

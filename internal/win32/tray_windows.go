@@ -91,7 +91,7 @@ func lookupMessageWindow(hwnd uintptr) *MessageWindow {
 // restart all trigger it — and rebuilds the notification area from
 // scratch: every icon that was there before is gone until its owner calls
 // Shell_NotifyIconW(NIM_ADD) again. messageWindowProc watches for this id
-// and calls back into the owning MessageWindow's onTaskbarRecreated so that
+// and calls back into the owning MessageWindow's cb.TaskbarRecreated so that
 // re-add happens automatically instead of leaving the process running with
 // no visible icon and no way to reach it short of Task Manager.
 var taskbarCreatedMsg = registerTaskbarCreatedMsg()
@@ -139,9 +139,10 @@ var messageWindowProc = syscall.NewCallback(func(hwnd, msg, wparam, lparam uintp
 		}
 		return 0
 	case wmHotkey:
-		// The registration id is the low word of wParam; the high word
-		// repeats the modifiers and key, which the owner already knows from
-		// the id.
+		// The registration id is the low word of wParam. The modifiers and
+		// virtual-key code live in lParam (LOWORD = modifiers, HIWORD =
+		// virtual key), not in wParam's high word; this handler does not
+		// need either since the id alone identifies the registration.
 		if mw := lookupMessageWindow(hwnd); mw != nil && mw.cb.Hotkey != nil {
 			mw.cb.Hotkey(int32(wparam & 0xFFFF))
 		}
