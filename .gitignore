@@ -2,3 +2,4 @@
 fenster.exe
 *.syso
 .vscode/
+.claude/worktrees/
