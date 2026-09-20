@@ -176,3 +176,20 @@ func NewID() string {
 	}
 	return idEncoding.EncodeToString(buf[:])[:6]
 }
+
+// MinimizeOthers reports whether restoring a layout should minimize the open
+// windows that layout does not account for. It defaults to true: an absent
+// key in layouts.json — every file written before the option existed — means
+// the feature is on, so the default does not depend on the file having been
+// rewritten.
+func (s *Store) MinimizeOthers() bool {
+	if s.file.MinimizeOthers == nil {
+		return true
+	}
+	return *s.file.MinimizeOthers
+}
+
+// SetMinimizeOthers records the option. It always writes a concrete value,
+// so an explicit false is persisted rather than collapsing back to "unset"
+// and defaulting on again.
+func (s *Store) SetMinimizeOthers(v bool) { s.file.MinimizeOthers = &v }

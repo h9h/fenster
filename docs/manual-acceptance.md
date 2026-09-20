@@ -288,9 +288,46 @@ Then start `.\fenster.exe` and work through the list below.
     second tray interaction if reachable). fenster exits; no window is left
     orphaned on screen and no process remains.
 
+36. **Extraneous windows are minimized by default.** Confirm the tray menu's
+    "Andere Fenster minimieren" is checked (it is on a fresh install). Open
+    two or three applications that are **not** part of a saved layout, then
+    restore that layout. Those windows are minimized, the layout's windows
+    are placed, and the balloon includes `, <n> minimiert` with n matching
+    the number that actually went down.
+
+37. **The layout's own windows end up in front.** After the restore in
+    item 36, the restored windows are visible and focused — not sitting
+    behind anything. This is why minimizing happens before placement.
+
+38. **An unticked window is left alone.** Untick one window in a layout's
+    submenu, then restore with the option on. That window is neither
+    restored nor minimized: it stays exactly where and as it was. The
+    balloon counts it under `abgewählt`, never under `minimiert`.
+
+39. **Already-minimized windows are not counted.** Minimize an extraneous
+    window by hand, then restore the layout. It stays minimized and the
+    `<n> minimiert` count does **not** include it.
+
+40. **fenster's own windows are never minimized.** With the option on,
+    restore a layout while the tray menu has just been used. The tray icon
+    remains, and no fenster dialog or window is minimized. (Its windows are
+    ineligible, so they are not candidates at all.)
+
+41. **Turning the option off restores the previous behaviour.** Untick
+    "Andere Fenster minimieren" — the menu reopens immediately with the box
+    now clear, the way the per-window checkboxes behave. Restore a layout:
+    nothing outside the layout is touched, and the balloon has no
+    `minimiert` clause. *Check*: `layouts.json` contains
+    `"minimizeOthers": false`.
+
+42. **The off setting survives a restart.** With the option off, quit
+    fenster and start it again. The menu still shows it unchecked. (A plain
+    boolean would have dropped the `false` out of the file and silently
+    re-enabled the feature here.)
+
 ## Reporting results
 
 For each item, record pass/fail and, on failure, the relevant excerpt from
-`fenster.log` or the differing part of `layouts.json`. These 35 items are
+`fenster.log` or the differing part of `layouts.json`. These 42 items are
 interactive and cannot be verified by an agent; they require a human with a
 real desktop session and are not covered by `go test`.

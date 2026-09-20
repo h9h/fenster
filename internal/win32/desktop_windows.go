@@ -322,3 +322,19 @@ func ApplyPlacement(handle uintptr, r store.Rect, screen store.Rect, state store
 	}
 	return nil
 }
+
+// MinimizeWindow minimizes hwnd without activating it and without touching
+// its restored rectangle.
+//
+// SW_SHOWMINNOACTIVE rather than SW_MINIMIZE because a restore minimizes a
+// whole set of extraneous windows in a row: activating each one in turn
+// would hand focus around the desktop and leave it wherever the last
+// minimize landed, instead of on the layout being restored.
+//
+// ShowWindow's return value reports the window's *previous* visibility, not
+// success or failure, so it is deliberately not treated as an error. A
+// window that vanished between enumeration and this call simply does
+// nothing, which is the correct outcome.
+func MinimizeWindow(hwnd uintptr) {
+	procShowWindow.Call(hwnd, uintptr(swShowMinNoActive))
+}

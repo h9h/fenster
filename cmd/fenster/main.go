@@ -336,6 +336,7 @@ func (a *application) showMenuOnce() (reopen bool) {
 		Unavailable:        unavailable,
 		AutostartOn:        autostartOn,
 		AutostartAvailable: autostartAvailable,
+		MinimizeOthers:     a.store.MinimizeOthers(),
 	})
 	menu, actions := tray.Render(items)
 	id := menu.Track(a.msgWindow.Handle())
@@ -371,6 +372,8 @@ func (a *application) dispatch(action tray.Action, mons []store.Monitor, live []
 		a.actionDelete(action.LayoutID)
 	case tray.ActionAutostart:
 		a.actionToggleAutostart()
+	case tray.ActionMinimizeOthers:
+		reopen = a.actionToggleMinimizeOthers()
 	case tray.ActionOpenFolder:
 		a.actionOpenFolder()
 	case tray.ActionQuit:
@@ -442,6 +445,11 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 	// its window is not running, and lumping both into one "skipped" bucket
 	// made the balloon claim windows were "nicht offen" for windows the user
 	// had simply unticked.
+	// Extraneous windows go first, so the layout's own windows are placed
+	// onto an already-cleared desktop and end up in front. Minimizing
+	// afterwards would leave focus wherever the last minimize put it.
+	minimized := a.minimizeExtraneous(plan.Unmatched)
+
 	restored, deselected, missing, failed := 0, 0, 0, 0
 	for _, m := range plan.Matches {
 		if !m.Entry.Include {
@@ -458,7 +466,29 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 	}
 	missing = len(plan.Missing)
 
-	a.notify(restoreMessage(restored, deselected, missing, failed))
+	a.notify(restoreMessage(restored, deselected, missing, minimized, failed))
+}
+
+// minimizeExtraneous minimizes the open windows the layout does not account
+// for and reports how many were actually changed. It is a no-op when the
+// option is off.
+//
+// A window that is already minimized is skipped rather than minimized again:
+// it is not counted, because the balloon reports what this restore did, not
+// how many windows happen to be minimized afterwards.
+func (a *application) minimizeExtraneous(unmatched []layout.Live) int {
+	if !a.store.MinimizeOthers() {
+		return 0
+	}
+	n := 0
+	for _, w := range unmatched {
+		if w.State == store.StateMinimized {
+			continue
+		}
+		win32.MinimizeWindow(w.Handle)
+		n++
+	}
+	return n
 }
 
 // clampEntry computes the two rectangles a restore applies for one saved
@@ -744,6 +774,22 @@ func (a *application) actionToggleAutostart() {
 		return
 	}
 	a.notify("Mit Windows starten: aktiviert")
+}
+
+// actionToggleMinimizeOthers flips the "minimize windows that are not part
+// of the layout" option and reports whether the menu should reopen, the same
+// way the per-window checkboxes do: this is a checkbox, and a Win32 popup
+// menu closes on every click, so reopening is what makes a checkbox feel
+// like one.
+func (a *application) actionToggleMinimizeOthers() bool {
+	current := a.store.MinimizeOthers()
+	a.store.SetMinimizeOthers(!current)
+	if err := a.store.Save(); err != nil {
+		a.store.SetMinimizeOthers(current) // roll back to match the file
+		a.reportError("Einstellung konnte nicht gespeichert werden", err)
+		return false
+	}
+	return true
 }
 
 func (a *application) actionOpenFolder() {
