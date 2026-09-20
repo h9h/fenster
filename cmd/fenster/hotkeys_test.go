@@ -236,3 +236,58 @@ func TestProbeRetriesFailedRelease(t *testing.T) {
 		t.Error("sync did not actually release the probe registration")
 	}
 }
+
+// TestHotkeyModsRoundTrip pins the two translations against each other. They
+// are written out branch by branch on purpose, which is exactly the shape of
+// code where a single mistyped pair goes unnoticed.
+func TestHotkeyModsRoundTrip(t *testing.T) {
+	all := hotkey.ModAlt | hotkey.ModCtrl | hotkey.ModShift | hotkey.ModWin
+	for m := hotkey.Mod(0); m <= all; m++ {
+		if m&^all != 0 {
+			continue
+		}
+		if got := hotkeyMods(win32Mods(m)); got != m {
+			t.Errorf("hotkeyMods(win32Mods(%#x)) = %#x, want %#x", m, got, m)
+		}
+	}
+}
+
+func TestDescribeCaptureAcceptsAValidCombination(t *testing.T) {
+	display, problem := describeCapture(win32.ModControl|win32.ModShift, 0x31)
+	if problem != "" {
+		t.Errorf("problem = %q, want empty", problem)
+	}
+	if want := "Strg+Umschalt+1"; display != want {
+		t.Errorf("display = %q, want %q", display, want)
+	}
+}
+
+// TestDescribeCaptureRejectsAKeyWithNoSignal is the regression guard for the
+// bug that prompted the capture dialog: a Mac keyboard's Option+1 arrives as
+// vk 0xFF with no Alt modifier, and used to be storable as a hotkey that
+// could never fire.
+func TestDescribeCaptureRejectsAKeyWithNoSignal(t *testing.T) {
+	display, problem := describeCapture(win32.ModControl, 0xFF)
+	if problem == "" {
+		t.Fatal("problem is empty; a key with no virtual-key code must be refused")
+	}
+	if want := "Strg"; display != want {
+		t.Errorf("display = %q, want %q — the echo must still follow the held modifiers", display, want)
+	}
+}
+
+func TestDescribeCaptureEchoesModifiersWhileIncomplete(t *testing.T) {
+	display, problem := describeCapture(win32.ModControl|win32.ModAlt, 0)
+	if problem == "" {
+		t.Error("holding only modifiers must not count as a complete combination")
+	}
+	if want := "Strg+Alt"; display != want {
+		t.Errorf("display = %q, want %q", display, want)
+	}
+}
+
+func TestDescribeCaptureRejectsAModifierlessKey(t *testing.T) {
+	if _, problem := describeCapture(0, 0x31); problem == "" {
+		t.Error("a key with no modifier must be refused")
+	}
+}

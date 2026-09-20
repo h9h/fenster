@@ -139,9 +139,11 @@ func Parse(s string) (Hotkey, error) {
 	}
 	// A combination without a modifier would be swallowed system-wide, from
 	// every application, for as long as fenster runs. Nobody asks for that
-	// on purpose, so it is refused rather than granted.
+	// on purpose, so it is refused rather than granted. The sentinel is
+	// shared with FromKeys so the typed and captured paths report this in
+	// the same words.
 	if h.Mods == 0 {
-		return Hotkey{}, errors.New("mindestens ein Modifikator (Strg, Alt, Umschalt oder Win) ist nötig")
+		return Hotkey{}, ErrNoModifier
 	}
 	return h, nil
 }
@@ -159,21 +161,33 @@ func (h Hotkey) format(german bool) string {
 	if h.IsZero() {
 		return ""
 	}
+	return strings.Join(append(modParts(h.Mods, german), keyName(h.Key, german)), "+")
+}
+
+// modParts renders a modifier set in the fixed order Ctrl, Alt, Shift, Win.
+// Split out of format so the capture dialog can echo a half-pressed
+// combination — modifiers held, no key yet — using the same spelling and the
+// same order the finished combination will have.
+func modParts(m Mod, german bool) []string {
 	var parts []string
-	if h.Mods&ModCtrl != 0 {
+	if m&ModCtrl != 0 {
 		parts = append(parts, pick(german, "Strg", "Ctrl"))
 	}
-	if h.Mods&ModAlt != 0 {
+	if m&ModAlt != 0 {
 		parts = append(parts, "Alt")
 	}
-	if h.Mods&ModShift != 0 {
+	if m&ModShift != 0 {
 		parts = append(parts, pick(german, "Umschalt", "Shift"))
 	}
-	if h.Mods&ModWin != 0 {
+	if m&ModWin != 0 {
 		parts = append(parts, "Win")
 	}
-	return strings.Join(append(parts, keyName(h.Key, german)), "+")
+	return parts
 }
+
+// ModLabel is the German rendering of a modifier set on its own, for the
+// capture dialog's echo while the user is still holding modifiers down.
+func ModLabel(m Mod) string { return strings.Join(modParts(m, true), "+") }
 
 func pick(german bool, de, en string) string {
 	if german {
@@ -201,4 +215,60 @@ func keyName(vk uint32, german bool) string {
 		}
 	}
 	return fmt.Sprintf("VK%02X", vk)
+}
+
+// vkNoMapping is the virtual-key code Windows reports for a keystroke the
+// active keyboard layout consumed to compose a character rather than
+// producing a usable key. A Mac keyboard does this for Option+<digit>: the
+// keypress arrives as the character "¡" with vk 0xFF and no Alt modifier at
+// all. Nothing can be registered from it, which is why it is rejected at
+// capture time rather than stored and left to fail silently forever after.
+const vkNoMapping = 0xFF
+
+// The rules FromKeys and Parse both enforce, as sentinels rather than bare
+// strings: the capture dialog shows them to the user verbatim, and the two
+// entry points must agree on the wording as well as on the rule.
+var (
+	// ErrNoKeyPressed means only modifiers were held — the combination is
+	// incomplete, not wrong.
+	ErrNoKeyPressed = errors.New("noch keine Taste gedrückt")
+	// ErrNoKeySignal means the keystroke carried no usable virtual-key code
+	// (see vkNoMapping).
+	ErrNoKeySignal = errors.New("diese Taste sendet kein auswertbares Tastensignal")
+	// ErrUnsupportedKey means a real key that fenster does not accept as a
+	// hotkey, e.g. a punctuation key whose position moves between layouts.
+	ErrUnsupportedKey = errors.New("diese Taste wird nicht unterstützt")
+	// ErrNoModifier is the "at least one modifier" rule, shared with Parse.
+	ErrNoModifier = errors.New("mindestens ein Modifikator (Strg, Alt, Umschalt oder Win) ist nötig")
+)
+
+// validVK is every virtual-key code a hotkey may use, derived from the same
+// table Parse accepts by name, so the typed and captured paths can never
+// drift apart about which keys exist.
+var validVK = func() map[uint32]bool {
+	m := make(map[uint32]bool, len(keyByName))
+	for _, vk := range keyByName {
+		m[vk] = true
+	}
+	return m
+}()
+
+// FromKeys builds a Hotkey from a combination captured from the keyboard,
+// applying exactly the rules Parse applies to typed text. It exists so the
+// capture dialog can validate a keystroke while the user is still looking at
+// the dialog, instead of accepting something that only fails later at
+// registration — or worse, registers successfully and then never fires
+// because the keyboard cannot produce it again.
+func FromKeys(mods Mod, vk uint32) (Hotkey, error) {
+	switch {
+	case vk == 0:
+		return Hotkey{}, ErrNoKeyPressed
+	case vk == vkNoMapping:
+		return Hotkey{}, ErrNoKeySignal
+	case !validVK[vk]:
+		return Hotkey{}, ErrUnsupportedKey
+	case mods == 0:
+		return Hotkey{}, ErrNoModifier
+	}
+	return Hotkey{Mods: mods, Key: vk}, nil
 }

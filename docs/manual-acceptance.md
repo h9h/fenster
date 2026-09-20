@@ -178,34 +178,38 @@ Then start `.\fenster.exe` and work through the list below.
     the Escape case.
 
 19. **Assign a hotkey and press it.** Open a layout's submenu and click
-    "Hotkey …". Type `Strg+Alt+1` and confirm. A balloon reads
-    `Hotkey für "<name>": Strg+Alt+1`. Close the menu, then press
-    **Strg+Alt+1**: the same balloon that "Alle wiederherstellen" would show
-    appears (e.g. `<n> Fenster wiederhergestellt`), and the windows move.
+    "Hotkey …". Press **Strg+Umschalt+1** — the echo line shows it — and
+    confirm with `Enter` or `OK`. A balloon reads
+    `Hotkey für "<name>": Strg+Umschalt+1`. Close the menu, then press
+    **Strg+Umschalt+1**: the same balloon that "Alle wiederherstellen" would
+    show appears (e.g. `<n> Fenster wiederhergestellt`), and the windows
+    move. Use a combination your own keyboard can actually produce; the
+    dialog will not let you confirm one it cannot.
 
 20. **Menu reflects the assignment.** Reopen the tray menu. The layout's row
-    shows `Strg+Alt+1` right-aligned (the accelerator column), and its
-    submenu's hotkey entry now reads `Hotkey: Strg+Alt+1 …` instead of
+    shows `Strg+Umschalt+1` right-aligned (the accelerator column), and its
+    submenu's hotkey entry now reads `Hotkey: Strg+Umschalt+1 …` instead of
     `Hotkey …`.
 
 21. **Cancelling or reassigning the same combination changes nothing.** Open
     "Hotkey …" on the layout from step 19 and press **Escape**: no balloon
-    appears and `layouts.json` is untouched. Open it again, retype
-    `Strg+Alt+1` (the combination it already has) and confirm: again no
+    appears and `layouts.json` is untouched. Open it again, press
+    `Strg+Umschalt+1` (the combination it already has) and confirm: again no
     balloon and no change — re-submitting a layout's own current combination
     is treated as a no-op, not re-probed as a conflict with itself.
 
-22. **Invalid syntax is rejected.** Open "Hotkey …" and type `F5` (a key with
-    no modifier) and confirm. An error balloon reads
-    `Hotkey: mindestens ein Modifikator (Strg, Alt, Umschalt oder Win) ist
-    nötig`. Try `Strg+Quatsch` instead: the balloon reads
-    `Hotkey: unbekannte Taste "Quatsch"`. In both cases reopening the menu
-    shows the layout's previous binding (or none), unchanged.
+22. **A hand-edited stored value is still validated on load.** Quit fenster,
+    set a layout's `"hotkey"` in `layouts.json` to `"Strg+Quatsch"`, and
+    start fenster again. The layout's row shows no accelerator column, the
+    submenu entry reads `Hotkey …`, and `fenster.log` names the layout and
+    the unparseable value. The file itself is **not** rewritten — the bad
+    value is still there to correct by hand.
 
 23. **Conflicting with another layout of the same setup is refused.** With
-    two layouts saved under the current monitor setup, assign `Strg+Alt+1` to
-    the second one too. The balloon reads
-    `Hotkey: Strg+Alt+1 ist bereits mit "<first layout's name>" belegt`, and
+    two layouts saved under the current monitor setup, assign
+    `Strg+Umschalt+1` to the second one too. The balloon reads
+    `Hotkey: Strg+Umschalt+1 ist bereits mit "<first layout's name>" belegt`,
+    and
     reopening the menu shows the second layout still has its previous
     binding — nothing was written.
 
@@ -243,15 +247,50 @@ Then start `.\fenster.exe` and work through the list below.
     dialog stays usable (typing and OK/Abbrechen still work normally
     afterwards).
 
-29. **Clearing a hotkey.** Open "Hotkey …" on a layout that has one assigned,
-    delete the text so the field is empty, and confirm. The balloon reads
-    `Hotkey für "<name>" entfernt`. Reopening the menu shows the accelerator
-    column gone from the layout row and the submenu entry back to
-    `Hotkey …`. Pressing the old combination now does nothing.
+29. **Clearing a hotkey.** Open "Hotkey …" on a layout that has one assigned
+    and click `Löschen`. The balloon reads `Hotkey für "<name>" entfernt`.
+    Reopening the menu shows the accelerator column gone from the layout row
+    and the submenu entry back to `Hotkey …`. Pressing the old combination
+    now does nothing.
+
+30. **Capture echoes what you press.** Open "Hotkey …". Hold `Strg` alone:
+    the echo line reads `Strg` and `OK` is greyed out. Still holding it,
+    press `1`: the echo becomes `Strg+1`, `OK` becomes available. Release
+    and press `Strg+Umschalt+2`: the echo follows to `Strg+Umschalt+2`. The
+    echo must track every press, not only the accepted ones.
+
+31. **A key with no usable signal is refused.** This needs a keyboard whose
+    Option/AltGr key composes characters rather than producing Alt — a Mac
+    keyboard does. In the capture dialog press Option+1 (which types `¡` in
+    a normal text field). The echo shows only the modifiers actually
+    reported, the message line reads `diese Taste sendet kein auswertbares
+    Tastensignal`, and `OK` stays greyed out. This is the case that used to
+    produce a stored hotkey that could never fire; it must be impossible to
+    confirm.
+
+32. **A combination without a modifier is refused.** In the capture dialog
+    press `F5` on its own. The message line reads `mindestens ein
+    Modifikator (Strg, Alt, Umschalt oder Win) ist nötig` and `OK` stays
+    greyed out.
+
+33. **Esc cancels, Enter confirms.** Open "Hotkey …", press a valid
+    combination, then press `Esc`: the dialog closes, no balloon, and the
+    layout's binding is unchanged. Open it again, press a valid combination,
+    then press `Enter`: the dialog closes and the balloon reports the new
+    binding. Neither `Esc` nor `Enter` is ever captured into the echo line.
+
+34. **Enter cannot confirm an invalid combination.** Open "Hotkey …", press
+    `F5` alone so the modifier message is showing, then press `Enter`.
+    Nothing happens — the dialog stays open and nothing is saved.
+
+35. **The capture dialog survives Beenden.** Open "Hotkey …" on any layout
+    and leave it open. From another route, quit fenster (Task Manager, or a
+    second tray interaction if reachable). fenster exits; no window is left
+    orphaned on screen and no process remains.
 
 ## Reporting results
 
 For each item, record pass/fail and, on failure, the relevant excerpt from
-`fenster.log` or the differing part of `layouts.json`. These 29 items are
+`fenster.log` or the differing part of `layouts.json`. These 35 items are
 interactive and cannot be verified by an agent; they require a human with a
 real desktop session and are not covered by `go test`.

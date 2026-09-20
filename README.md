@@ -94,23 +94,41 @@ what "Alle wiederherstellen" does — same window matching, same clamping of
 off-screen rectangles, same skipped/deselected counts in the balloon —
 because it runs the identical restore function, not a copy of it.
 
-Assign one through a layout's submenu, `Hotkey …` entry: it opens the same
-input dialog used for names and renames, this time prefilled with the current
-combination (if any). Accepted syntax:
+Assign one through a layout's submenu, `Hotkey …` entry. The dialog records
+the combination you actually **press** — it does not ask you to type its
+name. What you press is echoed live as you hold it, `OK` stays disabled
+until the combination is one fenster can register, and `Löschen` removes the
+binding.
 
-- Modifiers: `Strg`/`Ctrl`/`Control`/`Steuerung`, `Alt`, `Umschalt`/`Shift`,
-  `Win`/`Windows`.
-- Keys: `A`–`Z`, `0`–`9`, `F1`–`F24`, the arrow keys, `Pos1`, `Ende`,
-  `Bild↑`/`BildAuf`/`BildHoch`/`PageUp`, `Bild↓`/`BildAb`/`BildRunter`/
-  `PageDown`, `Einfg`/`Insert`, `Entf`/`Delete`/`Del`, `Leertaste`/`Space`,
-  `Esc`/`Escape`, `Tab`, `Eingabe`/`Enter`/`Return`.
-- Tokens may be separated by `+`, `-` or spaces, and spelling is
-  case-insensitive.
+Capturing rather than typing is deliberate, and was not the original design.
+Typing looked equivalent until it met a keyboard whose Option key composes
+characters instead of producing Alt — a Mac keyboard does this. There,
+`Ctrl+Alt+1` could be typed, stored, and registered with Windows
+successfully, and then never fire, because the keyboard could not produce
+that combination in the first place. Nothing reported a fault, because from
+fenster's side nothing had failed. A captured combination cannot have that
+problem: what you cannot press, you cannot save.
 
-At least one modifier is required — a bare `F5` would be swallowed
-system-wide, from every application, for as long as fenster runs, and nobody
-asks for that on purpose. Leaving the input empty clears the layout's
-hotkey.
+The dialog refuses three things, each named inline while you are still
+looking at it:
+
+- **A key that sends no usable key signal.** Some layouts consume a
+  keystroke to compose a character and report no virtual key at all; that is
+  the Mac Option case above, and there is nothing there to register.
+- **A combination with no modifier.** A bare `F5` would be swallowed
+  system-wide, from every application, for as long as fenster runs, and
+  nobody asks for that on purpose.
+- **A key fenster does not accept**, such as punctuation whose position
+  moves between keyboard layouts.
+
+`Esc` cancels and `Enter` confirms, so those two keys cannot themselves be
+part of a hotkey — every other key is captured. `Löschen` has no keyboard
+equivalent for the same reason.
+
+One limitation follows from capturing: the shell intercepts some Windows-key
+combinations before any window sees them, so a few `Win`-based combinations
+cannot be captured. In practice these are largely combinations Windows
+refuses to register anyway.
 
 `MOD_NOREPEAT` is always set on the underlying registration, so holding the
 keys down restores once, not once per repeat.
@@ -134,8 +152,18 @@ become unavailable in two distinct ways:
   back.
 
 `layouts.json` stores the combination as readable text, e.g.
-`"hotkey": "Ctrl+Alt+1"`. A stored value this build cannot parse is ignored
-and logged, never rewritten or silently dropped from the file.
+`"hotkey": "Ctrl+Alt+1"` — the canonical English form, regardless of the
+German spelling the menu displays. A stored value this build cannot parse is
+ignored and logged, never rewritten or silently dropped from the file. The
+text form is still parsed on load, so a hand-edited file keeps working:
+`Strg`/`Ctrl`/`Control`/`Steuerung`, `Alt`, `Umschalt`/`Shift`,
+`Win`/`Windows` as modifiers, and `A`–`Z`, `0`–`9`, `F1`–`F24`, the arrow
+keys, `Pos1`, `Ende`, `Bild↑`/`BildAuf`/`PageUp`, `Bild↓`/`BildAb`/
+`PageDown`, `Einfg`/`Insert`, `Entf`/`Delete`, `Leertaste`/`Space`, `Tab`
+and the rest, separated by `+`, `-` or spaces, case-insensitively. Anything
+hand-edited in is subject to the same rules the dialog enforces, and a
+combination your keyboard cannot produce will still never fire — which is
+precisely what the dialog exists to stop you doing by accident.
 
 ## Snapped windows
 

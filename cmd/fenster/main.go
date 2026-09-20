@@ -579,16 +579,28 @@ func (a *application) actionHotkey(id string) {
 		a.reportError("Hotkey konnte nicht geändert werden", fmt.Errorf("Layout %q nicht gefunden", id))
 		return
 	}
-	current, _ := hotkey.Parse(l.Hotkey) // an unparseable stored value prefills as empty
+	current, _ := hotkey.Parse(l.Hotkey) // an unparseable stored value echoes as empty
 
-	text, ok := win32.InputBox("Hotkey", "Tastenkombination:", current.Label())
+	// The combination is captured, not typed. Typing let a user enter a
+	// perfectly valid "Ctrl+Alt+1" on a keyboard that cannot produce Alt at
+	// all — it stored, it registered, and it then never fired, with nothing
+	// anywhere reporting a fault. Capturing means what cannot be pressed
+	// cannot be saved.
+	mods, vk, ok, cleared := win32.CaptureHotkey(
+		"Hotkey", "Tastenkombination drücken:", current.Label(), describeCapture)
 	if !ok {
 		return
 	}
-	hk, err := hotkey.Parse(strings.TrimSpace(text))
-	if err != nil {
-		a.reportError("Hotkey", err)
-		return
+	var hk hotkey.Hotkey
+	if !cleared {
+		var err error
+		hk, err = hotkey.FromKeys(hotkeyMods(mods), vk)
+		if err != nil {
+			// The dialog already refuses to enable OK for anything invalid,
+			// so reaching here means the rules disagreed with themselves.
+			a.reportError("Hotkey", err)
+			return
+		}
 	}
 	// Nothing would change. Worth its own branch rather than falling
 	// through: re-probing a combination this layout already holds would

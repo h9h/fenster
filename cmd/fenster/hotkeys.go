@@ -176,3 +176,41 @@ func (m *hotkeyManager) sync(layouts []store.Layout, fingerprint string) int {
 	}
 	return newly
 }
+
+// hotkeyMods is the inverse of win32Mods: it turns the modifier bits a
+// captured keystroke carries back into the hotkey package's own vocabulary.
+// Written out branch by branch for the same reason win32Mods is — the two
+// bit sets coincide today, and depending on that would make internal/hotkey
+// quietly platform-dependent.
+func hotkeyMods(mods uint32) hotkey.Mod {
+	var out hotkey.Mod
+	if mods&win32.ModAlt != 0 {
+		out |= hotkey.ModAlt
+	}
+	if mods&win32.ModControl != 0 {
+		out |= hotkey.ModCtrl
+	}
+	if mods&win32.ModShift != 0 {
+		out |= hotkey.ModShift
+	}
+	if mods&win32.ModWin != 0 {
+		out |= hotkey.ModWin
+	}
+	return out
+}
+
+// describeCapture tells the capture dialog what to show for the keystroke it
+// just saw: the combination in German, and the reason it is not acceptable
+// if it is not. It is the only place the dialog's behaviour and the hotkey
+// rules meet, which is what keeps internal/win32 free of any opinion about
+// what a valid hotkey is.
+func describeCapture(mods, vk uint32) (display, problem string) {
+	m := hotkeyMods(mods)
+	hk, err := hotkey.FromKeys(m, vk)
+	if err != nil {
+		// Still echo the modifiers being held, so the dialog follows the
+		// user's fingers while it explains what is missing.
+		return hotkey.ModLabel(m), err.Error()
+	}
+	return hk.Label(), ""
+}
