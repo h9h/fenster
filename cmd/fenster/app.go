@@ -24,7 +24,11 @@ func suggestName(setupLabel string, now time.Time) string {
 	return fmt.Sprintf("%s · %s", prefix, timestamp)
 }
 
-// restoreMessage is the balloon text after a restore. deselected and missing
+// restoreMessage is the balloon text after a restore. minimized counts the
+// extraneous windows that were minimized to clear the way (see the
+// "Andere Fenster minimieren" option); it is reported separately from the
+// other counts because it is not an outcome for any entry of the layout.
+// deselected and missing
 // are reported separately (I3): deselected counts entries excluded by an
 // unticked checkbox — a deliberate choice, persisted in layouts.json — while
 // missing counts entries whose window could not be found among the ones
@@ -32,7 +36,7 @@ func suggestName(setupLabel string, now time.Time) string {
 // this function did, made unticking windows the user deliberately kept
 // closed indistinguishable from those windows simply not being open,
 // contradicting the whole point of persisted checkmarks.
-func restoreMessage(restored, deselected, missing, failed int) string {
+func restoreMessage(restored, deselected, missing, minimized, failed int) string {
 	var b strings.Builder
 	if restored == 0 {
 		b.WriteString("Kein Fenster wiederhergestellt")
@@ -44,6 +48,11 @@ func restoreMessage(restored, deselected, missing, failed int) string {
 	}
 	if missing > 0 {
 		fmt.Fprintf(&b, ", %d übersprungen (nicht offen)", missing)
+	}
+	// Counted separately from everything above: those describe entries of
+	// the layout, this describes windows the layout does not contain at all.
+	if minimized > 0 {
+		fmt.Fprintf(&b, ", %d minimiert", minimized)
 	}
 	if failed > 0 {
 		fmt.Fprintf(&b, ", %d fehlgeschlagen", failed)

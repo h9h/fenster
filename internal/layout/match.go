@@ -19,10 +19,18 @@ type Match struct {
 	Live  Live
 }
 
-// Plan is the outcome of matching: what can be restored and what is missing.
+// Plan is the outcome of matching: what can be restored, what is missing, and
+// what is open but belongs to no entry at all.
 type Plan struct {
 	Matches []Match
 	Missing []store.WindowEntry
+	// Unmatched are the eligible open windows no entry claimed — the
+	// "extraneous" windows the restore may minimize. Only Eligible windows
+	// appear here, so fenster's own windows, tool windows and the shell are
+	// structurally excluded. A window claimed by an entry is absent even
+	// when that entry is unticked: unticking means "leave this window
+	// alone", which is the opposite of minimizing it.
+	Unmatched []Live
 }
 
 // MatchEntries pairs saved entries with currently open windows. Three passes
@@ -103,6 +111,14 @@ func MatchEntries(entries []store.WindowEntry, live []Live) Plan {
 			continue
 		}
 		plan.Matches = append(plan.Matches, *m)
+	}
+	// Whatever no pass consumed is extraneous. taken is indexed by
+	// candidates, which Eligible already filtered, so nothing ineligible can
+	// reach this list.
+	for j, w := range candidates {
+		if !taken[j] {
+			plan.Unmatched = append(plan.Unmatched, w)
+		}
 	}
 	return plan
 }

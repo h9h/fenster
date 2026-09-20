@@ -123,6 +123,18 @@ type Layout struct {
 
 // File is the root of the JSON document.
 type File struct {
-	Version int      `json:"version"`
-	Layouts []Layout `json:"layouts"`
+	Version int `json:"version"`
+	// MinimizeOthers is the "minimize windows that are not part of the
+	// layout" option. It is a *bool rather than a bool because the default
+	// is ON, and a plain bool cannot tell an absent key from an explicit
+	// false: a layouts.json written before this option existed would then
+	// come up with the feature disabled, and turning it off deliberately
+	// would be dropped from the file by omitempty and silently re-enable
+	// itself on the next start. nil means "not set", which Store's
+	// MinimizeOthers reads as on.
+	//
+	// Declared ahead of Layouts so it lands near the top of the file rather
+	// than after a long window list, in a file users are invited to open.
+	MinimizeOthers *bool    `json:"minimizeOthers,omitempty"`
+	Layouts        []Layout `json:"layouts"`
 }

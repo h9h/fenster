@@ -63,6 +63,8 @@ Both left- and right-click open the same menu. Its structure, top to bottom:
   *different* monitor setup than the current one.
 - **"Mit Windows starten"** — checked when fenster is registered to start at
   logon (see Autostart below).
+- **"Andere Fenster minimieren"** — checked by default; minimizes every open
+  window a restored layout does not contain (see below).
 - **"Speicherort öffnen"** — opens Explorer with `layouts.json` selected (or
   its folder, if the file does not exist yet).
 - **"Beenden"** — removes the tray icon and exits.
@@ -164,6 +166,38 @@ and the rest, separated by `+`, `-` or spaces, case-insensitively. Anything
 hand-edited in is subject to the same rules the dialog enforces, and a
 combination your keyboard cannot produce will still never fire — which is
 precisely what the dialog exists to stop you doing by accident.
+
+## Minimizing windows the layout does not contain
+
+Checked by default. When a layout is restored, every eligible open window
+that layout has no entry for is minimized first, then the layout's own
+windows are placed. Doing it in that order means the restored windows land
+on an already-cleared desktop and end up in front; minimizing afterwards
+would leave focus wherever the last minimize put it.
+
+"Eligible" is the same test that decides what a layout captures in the first
+place, so fenster's own windows, tool windows, the desktop and taskbar,
+invisible and untitled windows are structurally excluded — they are never
+candidates for a layout, and so never candidates for minimizing either.
+
+A window that a layout *does* contain is never minimized, **including one
+you unticked**. Unticking a window means "leave this one alone": it is
+neither restored nor minimized, and it stays exactly where it is. The
+checkbox keeps meaning one thing.
+
+Two consequences worth knowing, both following directly from "every window
+the layout does not contain":
+
+- A window on a monitor the layout never touches is still minimized. The
+  option is about the layout's contents, not about screen geometry.
+- Windows that were already minimized are left alone and are not counted.
+  The balloon's `<n> minimiert` reports what this restore changed, not how
+  many windows are minimized afterwards.
+
+Turning the option off restores the previous behaviour exactly: only the
+layout's own windows are touched. The setting lives in `layouts.json` as
+`"minimizeOthers": false`; an absent key means on, so a file written before
+this option existed — and a fresh install — both start with it enabled.
 
 ## Snapped windows
 

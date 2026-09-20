@@ -89,6 +89,13 @@ var (
 	// taskbarCreatedMsg in tray_windows.go).
 	procRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
 
+	// procShowWindow minimizes an extraneous window during a restore. Note
+	// this is deliberately NOT SetWindowPlacement, which the restore path
+	// uses: SetWindowPlacement also rewrites rcNormalPosition, and an
+	// extraneous window is only being moved out of the way — where it
+	// returns to when the user restores it must not change.
+	procShowWindow = user32.NewProc("ShowWindow")
+
 	// Hotkey capture dialog (capture_windows.go). procGetKeyState reads the
 	// modifier state at the moment a key message arrives; procSetWindowTextW
 	// updates the dialog's echo line as the user presses combinations.

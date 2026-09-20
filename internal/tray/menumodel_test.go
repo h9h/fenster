@@ -464,3 +464,35 @@ func TestHotkeyEntryGetsACommandID(t *testing.T) {
 	}
 	t.Error("no command id was assigned to the hotkey entry")
 }
+
+func TestMinimizeOthersMenuItem(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		items := BuildMenu(MenuInput{
+			CurrentFingerprint: "fp1",
+			MinimizeOthers:     on,
+		})
+		entry, ok := find(items, "Andere Fenster minimieren")
+		if !ok {
+			t.Fatal("menu entry not found")
+		}
+		if entry.Checked != on {
+			t.Errorf("MinimizeOthers=%v: entry.Checked = %v, want %v", on, entry.Checked, on)
+		}
+		if entry.Action.Type != ActionMinimizeOthers {
+			t.Errorf("entry action = %+v, want ActionMinimizeOthers", entry.Action)
+		}
+		if entry.Disabled {
+			t.Error("entry must never be disabled; the option is always togglable")
+		}
+	}
+}
+
+func TestMinimizeOthersEntryGetsACommandID(t *testing.T) {
+	actions := FlattenActions(BuildMenu(MenuInput{CurrentFingerprint: "fp1"}))
+	for _, a := range actions {
+		if a.Type == ActionMinimizeOthers {
+			return
+		}
+	}
+	t.Error("no command id was assigned to the minimize-others entry")
+}

@@ -25,6 +25,7 @@ const (
 	ActionHotkey
 	ActionDelete
 	ActionAutostart
+	ActionMinimizeOthers
 	ActionOpenFolder
 	ActionQuit
 )
@@ -58,6 +59,11 @@ type MenuInput struct {
 	// then always read back as unchecked, so the menu item is greyed out and
 	// forced unchecked instead.
 	AutostartAvailable bool
+	// MinimizeOthers is the current state of the "minimize windows that are
+	// not part of the layout" option. Unlike AutostartOn it has no
+	// "available" companion: the option is a value in layouts.json, so
+	// there is no external state that could make it unreadable.
+	MinimizeOthers bool
 	// Unavailable holds the IDs of layouts whose hotkey is currently
 	// refused by Windows because another application owns the combination.
 	// Supplied by the hotkey manager so BuildMenu stays a pure function of
@@ -106,6 +112,11 @@ func BuildMenu(in MenuInput) []Item {
 			Checked:  in.AutostartOn && in.AutostartAvailable,
 			Disabled: !in.AutostartAvailable,
 			Action:   Action{Type: ActionAutostart},
+		},
+		Item{
+			Label:   "Andere Fenster minimieren",
+			Checked: in.MinimizeOthers,
+			Action:  Action{Type: ActionMinimizeOthers},
 		},
 		Item{Label: "Speicherort öffnen", Action: Action{Type: ActionOpenFolder}},
 		Item{Label: "Beenden", Action: Action{Type: ActionQuit}},

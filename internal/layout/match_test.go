@@ -18,6 +18,11 @@ func entry(exe, title string, ordinal int) store.WindowEntry {
 	}
 }
 
+// liveFor is an eligible window of exe titled title, for the Unmatched tests.
+func liveFor(exe, title string) Live {
+	return live(title, "C", exe)
+}
+
 func liveAt(handle uintptr, exe, title string) Live {
 	w := live(title, "C", exe)
 	w.Handle = handle
@@ -172,5 +177,69 @@ func TestMatchSkipsIneligibleLiveWindows(t *testing.T) {
 
 	if plan := MatchEntries(entries, []Live{hidden}); len(plan.Missing) != 1 {
 		t.Errorf("hidden windows are not restore targets: %+v", plan)
+	}
+}
+
+// TestMatchEntriesReportsUnmatchedWindows covers the "minimize extraneous
+// windows" feature: everything eligible that no entry claimed is what gets
+// minimized, so the plan has to name them.
+func TestMatchEntriesReportsUnmatchedWindows(t *testing.T) {
+	entries := []store.WindowEntry{
+		{Exe: `C:\a\editor.exe`, Title: "main.go", Ordinal: 0, Include: true},
+	}
+	live := []Live{
+		liveFor(`C:\a\editor.exe`, "main.go"), // claimed by the entry
+		liveFor(`C:\a\browser.exe`, "Docs"),   // extraneous
+		liveFor(`C:\a\chat.exe`, "Team"),      // extraneous
+	}
+
+	plan := MatchEntries(entries, live)
+
+	if len(plan.Matches) != 1 {
+		t.Fatalf("Matches = %d, want 1", len(plan.Matches))
+	}
+	got := map[string]bool{}
+	for _, w := range plan.Unmatched {
+		got[w.Title] = true
+	}
+	if len(got) != 2 || !got["Docs"] || !got["Team"] {
+		t.Errorf("Unmatched titles = %v, want Docs and Team", got)
+	}
+}
+
+// TestMatchEntriesExcludesIneligibleFromUnmatched pins that the feature can
+// never minimize fenster's own windows, tool windows or shell windows: they
+// are not candidates for matching, so they must not surface as extraneous
+// either.
+func TestMatchEntriesExcludesIneligibleFromUnmatched(t *testing.T) {
+	own := liveFor(`C:\a\fenster.exe`, "fenster")
+	own.Own = true
+	tool := liveFor(`C:\a\thing.exe`, "palette")
+	tool.Tool = true
+	hidden := liveFor(`C:\a\thing.exe`, "hidden")
+	hidden.Visible = false
+	shell := liveFor(`C:\a\explorer.exe`, "Program Manager")
+	shell.Class = "Progman"
+
+	plan := MatchEntries(nil, []Live{own, tool, hidden, shell})
+
+	if len(plan.Unmatched) != 0 {
+		t.Errorf("Unmatched = %+v, want none: ineligible windows are never extraneous", plan.Unmatched)
+	}
+}
+
+// TestMatchEntriesUnmatchedIgnoresTheIncludeFlag pins the decision that
+// unticking a window means "hands off": its live window is still claimed by
+// the entry, so it is not extraneous and will not be minimized.
+func TestMatchEntriesUnmatchedIgnoresTheIncludeFlag(t *testing.T) {
+	entries := []store.WindowEntry{
+		{Exe: `C:\a\editor.exe`, Title: "main.go", Ordinal: 0, Include: false},
+	}
+	live := []Live{liveFor(`C:\a\editor.exe`, "main.go")}
+
+	plan := MatchEntries(entries, live)
+
+	if len(plan.Unmatched) != 0 {
+		t.Errorf("Unmatched = %+v, want none: an unticked entry still claims its window", plan.Unmatched)
 	}
 }

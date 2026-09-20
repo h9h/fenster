@@ -266,3 +266,78 @@ func TestHotkeyRoundTripsThroughSave(t *testing.T) {
 		t.Errorf("Hotkey = %q, want %q", l.Hotkey, "Ctrl+Alt+1")
 	}
 }
+
+// TestMinimizeOthersDefaultsOnWhenAbsent is the load-bearing case for the
+// "default on" requirement: a layouts.json written before the setting
+// existed has no such key, and must still come up enabled.
+func TestMinimizeOthersDefaultsOnWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "layouts.json")
+	blob := `{"version":1,"layouts":[]}`
+	if err := os.WriteFile(path, []byte(blob), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(path)
+	if _, err := s.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !s.MinimizeOthers() {
+		t.Error("MinimizeOthers() = false for a file with no key, want true")
+	}
+}
+
+func TestMinimizeOthersHonoursAnExplicitValue(t *testing.T) {
+	for _, tc := range []struct {
+		blob string
+		want bool
+	}{
+		{`{"version":1,"minimizeOthers":false,"layouts":[]}`, false},
+		{`{"version":1,"minimizeOthers":true,"layouts":[]}`, true},
+	} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "layouts.json")
+		if err := os.WriteFile(path, []byte(tc.blob), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s := New(path)
+		if _, err := s.Load(); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.MinimizeOthers(); got != tc.want {
+			t.Errorf("%s: MinimizeOthers() = %v, want %v", tc.blob, got, tc.want)
+		}
+	}
+}
+
+// TestMinimizeOthersRoundTrips pins that turning the option OFF survives a
+// save/load cycle. A plain bool field with omitempty would drop the false
+// back out of the file and silently re-enable the feature on next start.
+func TestMinimizeOthersRoundTrips(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "layouts.json")
+
+		s := New(path)
+		s.SetMinimizeOthers(want)
+		if err := s.Save(); err != nil {
+			t.Fatal(err)
+		}
+
+		reloaded := New(path)
+		if _, err := reloaded.Load(); err != nil {
+			t.Fatal(err)
+		}
+		if got := reloaded.MinimizeOthers(); got != want {
+			t.Errorf("after saving %v, MinimizeOthers() = %v", want, got)
+		}
+	}
+}
+
+// TestNewStoreDefaultsMinimizeOthersOn covers a first run, where nothing has
+// been loaded from disk at all.
+func TestNewStoreDefaultsMinimizeOthersOn(t *testing.T) {
+	if !New(filepath.Join(t.TempDir(), "layouts.json")).MinimizeOthers() {
+		t.Error("a fresh store has MinimizeOthers() = false, want true")
+	}
+}
