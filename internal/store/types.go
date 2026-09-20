@@ -13,6 +13,12 @@ import "time"
 // exists decodes fine on an older binary too (encoding/json simply ignores
 // the unknown "screen" key). The change is backward and forward compatible,
 // so schema 1 still describes both shapes.
+//
+// Adding Layout.Hotkey did not bump this constant either, for the same
+// reason: a file written before it existed decodes with an empty Hotkey,
+// which every reader treats as "no hotkey", and a file written after it
+// exists decodes fine on an older binary, which ignores the unknown
+// "hotkey" key.
 const SchemaVersion = 1
 
 // Rect is a window or monitor rectangle in physical pixels of the virtual screen.
@@ -101,6 +107,18 @@ type Layout struct {
 	Updated time.Time     `json:"updated"`
 	Setup   Setup         `json:"setup"`
 	Windows []WindowEntry `json:"windows"`
+	// Hotkey is the global key combination that restores this layout, in the
+	// canonical English text form hotkey.Hotkey.Canonical produces (e.g.
+	// "Ctrl+Alt+1"). Empty means no hotkey. Text rather than a numeric
+	// modifier/virtual-key pair because layouts.json is a file the user is
+	// invited to open ("Speicherort öffnen"), and because it keeps raw Win32
+	// constants out of the file format — the same reason WindowState is
+	// "minimized" and not an SW_ number.
+	//
+	// A value this build cannot parse is treated as absent and logged; it is
+	// never silently rewritten, so a typo in a hand-edited file can be
+	// corrected by hand instead of being destroyed by the next save.
+	Hotkey string `json:"hotkey,omitempty"`
 }
 
 // File is the root of the JSON document.

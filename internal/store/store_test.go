@@ -221,3 +221,48 @@ func TestNewIDIsUniqueAndShort(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+func TestLoadTreatsMissingHotkeyAsNone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "layouts.json")
+	// A file as written before Layout.Hotkey existed.
+	blob := `{"version":1,"layouts":[{"id":"a","name":"Alt","windows":[]}]}`
+	if err := os.WriteFile(path, []byte(blob), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(path)
+	if recovered, err := s.Load(); err != nil || recovered != "" {
+		t.Fatalf("Load() = (%q, %v), want (\"\", nil)", recovered, err)
+	}
+	l, ok := s.Get("a")
+	if !ok {
+		t.Fatal("layout a missing after load")
+	}
+	if l.Hotkey != "" {
+		t.Errorf("Hotkey = %q, want empty", l.Hotkey)
+	}
+}
+
+func TestHotkeyRoundTripsThroughSave(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "layouts.json")
+
+	s := New(path)
+	s.Add(Layout{ID: "a", Name: "Dock", Hotkey: "Ctrl+Alt+1"})
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := New(path)
+	if _, err := reloaded.Load(); err != nil {
+		t.Fatal(err)
+	}
+	l, ok := reloaded.Get("a")
+	if !ok {
+		t.Fatal("layout a missing after reload")
+	}
+	if l.Hotkey != "Ctrl+Alt+1" {
+		t.Errorf("Hotkey = %q, want %q", l.Hotkey, "Ctrl+Alt+1")
+	}
+}

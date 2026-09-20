@@ -89,6 +89,12 @@ var (
 	// taskbarCreatedMsg in tray_windows.go).
 	procRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
 
+	// Global hotkeys. A hotkey registered by a thread can only be
+	// unregistered by that same thread, which is why the application locks
+	// its UI goroutine to an OS thread (runtime.LockOSThread in main).
+	procRegisterHotKey   = user32.NewProc("RegisterHotKey")
+	procUnregisterHotKey = user32.NewProc("UnregisterHotKey")
+
 	// Fix round 1: window classes need a real cursor and background brush,
 	// or a human tester sees no I-beam/arrow feedback and background paint
 	// artifacts on the dialog.
@@ -183,6 +189,24 @@ const (
 	// errorAlreadyExists is ERROR_ALREADY_EXISTS, the last-error code
 	// CreateMutexW leaves set when the named mutex already existed.
 	errorAlreadyExists = 183
+
+	// Hotkeys. modNoRepeat (MOD_NOREPEAT) makes Windows deliver one
+	// WM_HOTKEY per press instead of repeating while the keys are held
+	// down: a restore is not an operation that should run forty times a
+	// second.
+	modNoRepeat = 0x4000
+
+	// errorHotkeyAlreadyRegistered is ERROR_HOTKEY_ALREADY_REGISTERED, the
+	// last-error code RegisterHotKey leaves set when another window or
+	// process already owns the combination.
+	errorHotkeyAlreadyRegistered = 1409
+
+	// wmHotkey (WM_HOTKEY) carries the registration id in the low word of
+	// wParam. wmDisplayChange (WM_DISPLAYCHANGE) is broadcast when the
+	// display resolution or arrangement changes, which is when the set of
+	// layouts matching the current setup can change.
+	wmHotkey        = 0x0312
+	wmDisplayChange = 0x007E
 
 	// Icons
 	imageIcon      = 1

@@ -328,3 +328,139 @@ func TestFlattenActionsAssignsUniqueIDsSkippingSeparators(t *testing.T) {
 		seen[a] = true
 	}
 }
+
+func TestLayoutRowShowsHotkeyInAcceleratorColumn(t *testing.T) {
+	l := layoutFor("a", "Dock", "fp1", "Editor")
+	l.Hotkey = "Ctrl+Alt+1"
+
+	items := BuildMenu(MenuInput{
+		Layouts:            []store.Layout{l},
+		CurrentFingerprint: "fp1",
+	})
+
+	row, ok := find(items, "Dock")
+	if !ok {
+		t.Fatal("layout row not found")
+	}
+	if want := "Dock\tStrg+Alt+1"; row.Label != want {
+		t.Errorf("row label = %q, want %q", row.Label, want)
+	}
+}
+
+func TestForeignSetupRowHasNoAcceleratorColumn(t *testing.T) {
+	l := layoutFor("a", "Dock", "fp2", "Editor")
+	l.Hotkey = "Ctrl+Alt+1"
+
+	items := BuildMenu(MenuInput{
+		Layouts:            []store.Layout{l},
+		CurrentFingerprint: "fp1",
+	})
+
+	row, ok := find(items, "Dock")
+	if !ok {
+		t.Fatal("layout row not found")
+	}
+	if strings.Contains(row.Label, "\t") {
+		t.Errorf("row label = %q, want no accelerator column for a foreign setup", row.Label)
+	}
+}
+
+func TestUnavailableHotkeyIsMarked(t *testing.T) {
+	l := layoutFor("a", "Dock", "fp1", "Editor")
+	l.Hotkey = "Ctrl+Alt+1"
+
+	items := BuildMenu(MenuInput{
+		Layouts:            []store.Layout{l},
+		CurrentFingerprint: "fp1",
+		Unavailable:        map[string]bool{"a": true},
+	})
+
+	row, ok := find(items, "Dock")
+	if !ok {
+		t.Fatal("layout row not found")
+	}
+	if want := "Dock\tStrg+Alt+1 (belegt)"; row.Label != want {
+		t.Errorf("row label = %q, want %q", row.Label, want)
+	}
+	entry, ok := find(items, "Hotkey:")
+	if !ok {
+		t.Fatal("hotkey submenu entry not found")
+	}
+	if want := "Hotkey: Strg+Alt+1 (belegt) …"; entry.Label != want {
+		t.Errorf("submenu entry = %q, want %q", entry.Label, want)
+	}
+}
+
+func TestHotkeySubmenuEntry(t *testing.T) {
+	// The names avoid substrings of the fixed submenu commands: find walks
+	// depth-first, so a layout named "Mit" would be shadowed by the "Mit
+	// aktuellem Stand überschreiben" entry of the layout before it.
+	without := layoutFor("a", "OhneKey", "fp1", "Editor")
+	with := layoutFor("b", "MitKey", "fp1", "Editor")
+	with.Hotkey = "Ctrl+Alt+1"
+
+	items := BuildMenu(MenuInput{
+		Layouts:            []store.Layout{without, with},
+		CurrentFingerprint: "fp1",
+	})
+
+	row, ok := find(items, "OhneKey")
+	if !ok {
+		t.Fatal("layout row not found")
+	}
+	entry, ok := find(row.Children, "Hotkey")
+	if !ok {
+		t.Fatal("hotkey entry missing from the submenu")
+	}
+	if entry.Label != "Hotkey …" {
+		t.Errorf("entry label = %q, want %q", entry.Label, "Hotkey …")
+	}
+	if entry.Action.Type != ActionHotkey || entry.Action.LayoutID != "a" {
+		t.Errorf("entry action = %+v, want ActionHotkey for layout a", entry.Action)
+	}
+
+	set, ok := find(items, "MitKey")
+	if !ok {
+		t.Fatal("second layout row not found")
+	}
+	setEntry, ok := find(set.Children, "Hotkey")
+	if !ok {
+		t.Fatal("hotkey entry missing from the second submenu")
+	}
+	if want := "Hotkey: Strg+Alt+1 …"; setEntry.Label != want {
+		t.Errorf("entry label = %q, want %q", setEntry.Label, want)
+	}
+}
+
+func TestLayoutNameTabsAreStripped(t *testing.T) {
+	l := layoutFor("a", "Do\tck", "fp1", "Editor")
+	l.Hotkey = "Ctrl+Alt+1"
+
+	items := BuildMenu(MenuInput{
+		Layouts:            []store.Layout{l},
+		CurrentFingerprint: "fp1",
+	})
+
+	row, ok := find(items, "Do ck")
+	if !ok {
+		t.Fatal("layout row not found")
+	}
+	if want := "Do ck\tStrg+Alt+1"; row.Label != want {
+		t.Errorf("row label = %q, want %q — a name must not be able to forge a second column", row.Label, want)
+	}
+}
+
+func TestHotkeyEntryGetsACommandID(t *testing.T) {
+	l := layoutFor("a", "Dock", "fp1", "Editor")
+	actions := FlattenActions(BuildMenu(MenuInput{
+		Layouts:            []store.Layout{l},
+		CurrentFingerprint: "fp1",
+	}))
+
+	for _, a := range actions {
+		if a.Type == ActionHotkey && a.LayoutID == "a" {
+			return
+		}
+	}
+	t.Error("no command id was assigned to the hotkey entry")
+}

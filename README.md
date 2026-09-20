@@ -80,7 +80,62 @@ Each layout row expands into a submenu:
 - **"Mit aktuellem Stand überschreiben"** replaces the layout's saved windows
   with the current live set, keeping the same name and id.
 - **"Umbenennen…"** opens the input dialog prefilled with the current name.
+- **"Hotkey …"** opens the input dialog to assign or clear the layout's global
+  hotkey (see Hotkeys below). Once one is set, the entry reads
+  `Hotkey: <combination> …`, and the layout row itself gains a right-aligned
+  accelerator column showing the same combination — but only while that
+  layout's setup is the current one.
 - **"Löschen"** asks for confirmation, then removes the layout.
+
+## Hotkeys
+
+Each layout can carry one optional global hotkey. Pressing it does exactly
+what "Alle wiederherstellen" does — same window matching, same clamping of
+off-screen rectangles, same skipped/deselected counts in the balloon —
+because it runs the identical restore function, not a copy of it.
+
+Assign one through a layout's submenu, `Hotkey …` entry: it opens the same
+input dialog used for names and renames, this time prefilled with the current
+combination (if any). Accepted syntax:
+
+- Modifiers: `Strg`/`Ctrl`/`Control`/`Steuerung`, `Alt`, `Umschalt`/`Shift`,
+  `Win`/`Windows`.
+- Keys: `A`–`Z`, `0`–`9`, `F1`–`F24`, the arrow keys, `Pos1`, `Ende`,
+  `Bild↑`/`BildAuf`/`BildHoch`/`PageUp`, `Bild↓`/`BildAb`/`BildRunter`/
+  `PageDown`, `Einfg`/`Insert`, `Entf`/`Delete`/`Del`, `Leertaste`/`Space`,
+  `Esc`/`Escape`, `Tab`, `Eingabe`/`Enter`/`Return`.
+- Tokens may be separated by `+`, `-` or spaces, and spelling is
+  case-insensitive.
+
+At least one modifier is required — a bare `F5` would be swallowed
+system-wide, from every application, for as long as fenster runs, and nobody
+asks for that on purpose. Leaving the input empty clears the layout's
+hotkey.
+
+`MOD_NOREPEAT` is always set on the underlying registration, so holding the
+keys down restores once, not once per repeat.
+
+Only the layouts of the **current** monitor setup are ever registered with
+Windows, and registration is refreshed on every `WM_DISPLAYCHANGE`. This
+means the same combination can mean the dock layout at the desk and the
+laptop layout on the road: uniqueness is only enforced within one setup, and
+assigning a hotkey to a layout listed under "Andere Setups" is accepted but
+inert until that setup becomes current — the balloon says so. A hotkey can
+become unavailable in two distinct ways:
+
+- **Rejected at assignment time**: nothing is written, and the balloon names
+  the combination and, if it collides with another layout of the same setup,
+  that layout's name.
+- **Refused later**, because another application registered the same
+  combination after fenster started: this is logged, ballooned once (not on
+  every subsequent sync), and the layout's menu entry gains a `(belegt)`
+  marker until the combination is registered successfully again — closing
+  the other application and waiting for the next sync is enough to get it
+  back.
+
+`layouts.json` stores the combination as readable text, e.g.
+`"hotkey": "Ctrl+Alt+1"`. A stored value this build cannot parse is ignored
+and logged, never rewritten or silently dropped from the file.
 
 ## Snapped windows
 
@@ -251,7 +306,8 @@ matching, off-screen clamping, the monitor fingerprint, the menu data model,
 the store's load/save/corruption handling) without needing a desktop. The
 `win32integration` tag additionally exercises real Win32 calls — window
 enumeration, monitor enumeration, moving an actual window, building a real
-menu — and therefore only runs on Windows with a graphical session.
+menu, registering a real global hotkey — and therefore only runs on Windows
+with a graphical session.
 
 Everything that needs live human interaction with the tray icon, the popup
 menu and the input dialog (there is no automated UI-driving test for those)
