@@ -472,23 +472,33 @@ func (a *application) actionRestore(id string, mons []store.Monitor, live []layo
 // minimizeExtraneous minimizes the open windows the layout does not account
 // for and reports how many were actually changed. It is a no-op when the
 // option is off.
+func (a *application) minimizeExtraneous(unmatched []layout.Live) int {
+	handles := windowsToMinimize(unmatched, a.store.MinimizeOthers())
+	for _, h := range handles {
+		win32.MinimizeWindow(h)
+	}
+	return len(handles)
+}
+
+// windowsToMinimize decides which extraneous windows to minimize, separated
+// from the Win32 call that does it so the decision is testable without a
+// desktop — the same split the rest of this codebase uses.
 //
 // A window that is already minimized is skipped rather than minimized again:
-// it is not counted, because the balloon reports what this restore did, not
-// how many windows happen to be minimized afterwards.
-func (a *application) minimizeExtraneous(unmatched []layout.Live) int {
-	if !a.store.MinimizeOthers() {
-		return 0
+// it is not counted, because the balloon reports what this restore changed,
+// not how many windows happen to be minimized afterwards.
+func windowsToMinimize(unmatched []layout.Live, enabled bool) []uintptr {
+	if !enabled {
+		return nil
 	}
-	n := 0
+	var handles []uintptr
 	for _, w := range unmatched {
 		if w.State == store.StateMinimized {
 			continue
 		}
-		win32.MinimizeWindow(w.Handle)
-		n++
+		handles = append(handles, w.Handle)
 	}
-	return n
+	return handles
 }
 
 // clampEntry computes the two rectangles a restore applies for one saved

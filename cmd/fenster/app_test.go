@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"fenster/internal/layout"
 	"fenster/internal/store"
 )
 
@@ -107,5 +108,44 @@ func TestUnavailableMessage(t *testing.T) {
 		if got := unavailableMessage(tc.n); got != tc.want {
 			t.Errorf("unavailableMessage(%d) = %q, want %q", tc.n, got, tc.want)
 		}
+	}
+}
+
+func minimizable(title string, state store.WindowState, handle uintptr) layout.Live {
+	return layout.Live{Handle: handle, Title: title, Exe: `C:\a\x.exe`, State: state, Visible: true}
+}
+
+func TestWindowsToMinimize(t *testing.T) {
+	unmatched := []layout.Live{
+		minimizable("normal", store.StateNormal, 10),
+		minimizable("already down", store.StateMinimized, 11),
+		minimizable("maximized", store.StateMaximized, 12),
+	}
+
+	got := windowsToMinimize(unmatched, true)
+
+	// An already-minimized window is skipped: the balloon reports what this
+	// restore changed, not how many windows end up minimized.
+	want := []uintptr{10, 12}
+	if len(got) != len(want) {
+		t.Fatalf("windowsToMinimize = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("handle %d = %d, want %d", i, got[i], want[i])
+		}
+	}
+}
+
+func TestWindowsToMinimizeIsEmptyWhenDisabled(t *testing.T) {
+	unmatched := []layout.Live{minimizable("normal", store.StateNormal, 10)}
+	if got := windowsToMinimize(unmatched, false); len(got) != 0 {
+		t.Errorf("windowsToMinimize(.., false) = %v, want nothing", got)
+	}
+}
+
+func TestWindowsToMinimizeHandlesNothingExtraneous(t *testing.T) {
+	if got := windowsToMinimize(nil, true); len(got) != 0 {
+		t.Errorf("windowsToMinimize(nil, true) = %v, want nothing", got)
 	}
 }
