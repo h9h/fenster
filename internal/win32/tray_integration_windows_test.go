@@ -183,3 +183,76 @@ func TestMessageWindowRoutesHotkeyAndDisplayChange(t *testing.T) {
 		t.Error("DisplayChange callback was not invoked")
 	}
 }
+
+// TestSignalQuitMechanism exercises find-window-and-close against a class
+// name unique to this test, so it runs regardless of whether a real fenster
+// is live on this machine. TestSignalQuitFindsTheRealClass below covers the
+// other half — that SignalQuit names the class NewMessageWindow registers.
+func TestSignalQuitMechanism(t *testing.T) {
+	hInstance, _, _ := procGetModuleHandleW.Call(0)
+	class := fmt.Sprintf("fensterSignalQuitTest%d", uintptr(unsafe.Pointer(&hInstance)))
+
+	if _, err := NewMessageWindow(class, Callbacks{}); err != nil {
+		t.Fatalf("NewMessageWindow: %v", err)
+	}
+
+	if !signalQuitClass(class) {
+		t.Fatal("signalQuitClass found no window, but one was just created under that class")
+	}
+
+	// WM_CLOSE was posted; pump until the window is gone. DefWindowProcW
+	// turns it into a DestroyWindow, which posts WM_QUIT via WM_DESTROY.
+	var msg msgT
+	for {
+		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if ret == 0 {
+			break
+		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+
+	if signalQuitClass(class) {
+		t.Error("the window is still findable after being closed")
+	}
+}
+
+// TestSignalQuitClosesTheMessageWindow exercises the path deployment relies
+// on: find the running instance's hidden window by class name and ask it to
+// close. It uses the real MessageWindowClass, so a rename that broke the
+// pairing between NewMessageWindow and SignalQuit fails here rather than
+// silently reporting "nothing was running" during a deploy.
+func TestSignalQuitFindsTheRealClass(t *testing.T) {
+	// findWindowByClass, not SignalQuit: SignalQuit closes what it finds, so
+	// using it as a "is one running?" guard would shut down the very
+	// instance this check exists to protect.
+	if findWindowByClass(MessageWindowClass) != 0 {
+		t.Skip("a real fenster instance is running; skipping so the test does not close it")
+	}
+
+	mw, err := NewMessageWindow(MessageWindowClass, Callbacks{})
+	if err != nil {
+		t.Fatalf("NewMessageWindow: %v", err)
+	}
+
+	if !SignalQuit() {
+		t.Fatal("SignalQuit found no window, but one was just created under that class")
+	}
+
+	// WM_CLOSE was posted, so pump until the window is gone. DefWindowProcW
+	// turns it into a DestroyWindow, which posts WM_QUIT via WM_DESTROY.
+	var msg msgT
+	for {
+		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if ret == 0 {
+			break
+		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+
+	if SignalQuit() {
+		t.Error("the window is still findable after being closed")
+	}
+	_ = mw
+}

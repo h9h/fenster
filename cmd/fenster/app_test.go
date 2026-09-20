@@ -149,3 +149,24 @@ func TestWindowsToMinimizeHandlesNothingExtraneous(t *testing.T) {
 		t.Errorf("windowsToMinimize(nil, true) = %v, want nothing", got)
 	}
 }
+
+func TestWantsQuit(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"fenster.exe"}, false},
+		{[]string{"fenster.exe", "-quit"}, true},
+		{[]string{"fenster.exe", "--quit"}, true},
+		{[]string{"fenster.exe", "/quit"}, true},
+		{[]string{"fenster.exe", "-QUIT"}, true},
+		{[]string{"fenster.exe", "-something-else"}, false},
+		{[]string{"fenster.exe", "quit"}, false},
+		{nil, false},
+	}
+	for _, tc := range tests {
+		if got := wantsQuit(tc.args); got != tc.want {
+			t.Errorf("wantsQuit(%q) = %v, want %v", tc.args, got, tc.want)
+		}
+	}
+}

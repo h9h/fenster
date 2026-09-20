@@ -29,6 +29,37 @@ the notification area and has no window of its own.
 Only one instance runs at a time — starting a second copy shows
 `fenster läuft bereits.` and exits.
 
+## Deploying
+
+```
+.\deploy.ps1                       # installs to C:\Tools
+.\deploy.ps1 -Destination D:\Apps  # or anywhere else
+```
+
+The script builds, stops the running copy, installs the new binary and
+starts it. It builds first on purpose: deploying a binary you did not just
+build is how the wrong one ships.
+
+Stopping has to happen before copying — Windows locks a running executable —
+and it is done with `fenster.exe -quit`, not by terminating the process.
+`-quit` finds the running instance's hidden window by class name and posts
+it the same `WM_CLOSE` the tray menu's "Beenden" sends, so the instance
+shuts down through its own path. Terminating it instead leaves the tray icon
+behind in the notification area until the shell next reaps it, which looks
+like a crash. The exit code is the only thing a `-H=windowsgui` build can
+report: **0** when an instance was signalled, **1** when none was running,
+and the script treats 1 as "nothing to stop" rather than an error.
+
+After signalling, the script waits for the process to actually disappear
+before copying, and aborts with a clear message if it has not gone within
+ten seconds rather than overwriting a binary that is still running.
+
+**One thing the script deliberately does not touch:** "Mit Windows starten"
+records the full path of whichever executable was running when you ticked
+it. If you enabled autostart from a build directory, it still points there
+after deploying. Re-tick it from the deployed copy to move it; the script
+does not rewrite your registry behind your back.
+
 ## Where data lives
 
 Everything is under `%APPDATA%\fenster\`:

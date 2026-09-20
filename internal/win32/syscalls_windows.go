@@ -89,6 +89,11 @@ var (
 	// taskbarCreatedMsg in tray_windows.go).
 	procRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
 
+	// procFindWindowW locates an already-running instance's hidden message
+	// window by class name, so `fenster.exe -quit` can ask it to shut down
+	// (SignalQuit in tray_windows.go).
+	procFindWindowW = user32.NewProc("FindWindowW")
+
 	// procShowWindow minimizes an extraneous window during a restore. Note
 	// this is deliberately NOT SetWindowPlacement, which the restore path
 	// uses: SetWindowPlacement also rewrites rcNormalPosition, and an

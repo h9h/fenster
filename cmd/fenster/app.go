@@ -70,3 +70,23 @@ func unavailableMessage(n int) string {
 	}
 	return fmt.Sprintf("%d Hotkeys sind belegt und derzeit ohne Funktion", n)
 }
+
+// wantsQuit reports whether the process was started only to shut down an
+// already-running instance, as deploy.ps1 does before overwriting the
+// binary. Parsed by hand rather than with the flag package: this build has
+// no console (-H=windowsgui), and flag writes its usage to a stderr nobody
+// can read and then calls os.Exit on anything it does not recognise, which
+// would turn a typo into a silent no-op.
+//
+// "/quit" is accepted alongside the dash forms because it is the
+// conventional switch style on Windows and costs one comparison.
+func wantsQuit(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	switch strings.ToLower(args[1]) {
+	case "-quit", "--quit", "/quit":
+		return true
+	}
+	return false
+}
