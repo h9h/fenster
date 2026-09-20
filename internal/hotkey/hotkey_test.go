@@ -1,6 +1,9 @@
 package hotkey
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseAcceptsGermanAndEnglishSpellings(t *testing.T) {
 	want := Hotkey{Mods: ModCtrl | ModAlt, Key: 0x31} // VK for "1"
@@ -134,6 +137,90 @@ func TestFormatParseRoundTripNamedKeys(t *testing.T) {
 			if back != h {
 				t.Errorf("Parse(%q) = %+v, want %+v", s, back, h)
 			}
+		}
+	}
+}
+
+func TestFromKeysAcceptsACapturedCombination(t *testing.T) {
+	got, err := FromKeys(ModCtrl|ModShift, 0x31)
+	if err != nil {
+		t.Fatalf("FromKeys: unexpected error %v", err)
+	}
+	if want := (Hotkey{Mods: ModCtrl | ModShift, Key: 0x31}); got != want {
+		t.Errorf("FromKeys = %+v, want %+v", got, want)
+	}
+}
+
+// TestFromKeysRejectsAKeyWithNoSignal pins the case that made a hotkey
+// silently unpressable: a keyboard layout that composes a character instead
+// of producing a virtual key (a Mac keyboard's Option+digit does this)
+// reports vk 0xFF, which can never be registered.
+func TestFromKeysRejectsAKeyWithNoSignal(t *testing.T) {
+	if _, err := FromKeys(ModCtrl, 0xFF); !errors.Is(err, ErrNoKeySignal) {
+		t.Errorf("FromKeys(ModCtrl, 0xFF) error = %v, want ErrNoKeySignal", err)
+	}
+}
+
+func TestFromKeysRejections(t *testing.T) {
+	tests := []struct {
+		name string
+		mods Mod
+		vk   uint32
+		want error
+	}{
+		{"only modifiers held", ModCtrl | ModAlt, 0, ErrNoKeyPressed},
+		{"no modifier at all", 0, 0x31, ErrNoModifier},
+		{"key fenster does not accept", ModCtrl, 0xBA, ErrUnsupportedKey},
+	}
+	for _, tc := range tests {
+		if _, err := FromKeys(tc.mods, tc.vk); !errors.Is(err, tc.want) {
+			t.Errorf("%s: FromKeys(%#x, %#x) error = %v, want %v", tc.name, tc.mods, tc.vk, err, tc.want)
+		}
+	}
+}
+
+// TestFromKeysAgreesWithParse pins the two entry points on one rule set: a
+// combination captured from the keyboard and the same combination typed as
+// text must produce the same Hotkey, or the capture dialog and the old text
+// form could disagree about what is valid.
+func TestFromKeysAgreesWithParse(t *testing.T) {
+	for _, spec := range []string{"Ctrl+Shift+1", "Strg+Alt+F5", "Win+Shift+Left", "Ctrl+Alt+Entf"} {
+		typed, err := Parse(spec)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", spec, err)
+		}
+		captured, err := FromKeys(typed.Mods, typed.Key)
+		if err != nil {
+			t.Fatalf("FromKeys for %q: %v", spec, err)
+		}
+		if captured != typed {
+			t.Errorf("%q: captured %+v != typed %+v", spec, captured, typed)
+		}
+	}
+}
+
+func TestParseReportsMissingModifierWithTheSharedSentinel(t *testing.T) {
+	if _, err := Parse("F5"); !errors.Is(err, ErrNoModifier) {
+		t.Errorf("Parse(\"F5\") error = %v, want ErrNoModifier", err)
+	}
+}
+
+// TestModLabel covers the capture dialog's live echo: while only modifiers
+// are held there is no key to render yet, but the user must still see their
+// fingers reflected.
+func TestModLabel(t *testing.T) {
+	tests := []struct {
+		mods Mod
+		want string
+	}{
+		{0, ""},
+		{ModCtrl, "Strg"},
+		{ModCtrl | ModShift, "Strg+Umschalt"},
+		{ModWin | ModShift | ModCtrl | ModAlt, "Strg+Alt+Umschalt+Win"},
+	}
+	for _, tc := range tests {
+		if got := ModLabel(tc.mods); got != tc.want {
+			t.Errorf("ModLabel(%#x) = %q, want %q", tc.mods, got, tc.want)
 		}
 	}
 }

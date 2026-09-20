@@ -89,6 +89,12 @@ var (
 	// taskbarCreatedMsg in tray_windows.go).
 	procRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
 
+	// Hotkey capture dialog (capture_windows.go). procGetKeyState reads the
+	// modifier state at the moment a key message arrives; procSetWindowTextW
+	// updates the dialog's echo line as the user presses combinations.
+	procGetKeyState    = user32.NewProc("GetKeyState")
+	procSetWindowTextW = user32.NewProc("SetWindowTextW")
+
 	// Global hotkeys. A hotkey registered by a thread can only be
 	// unregistered by that same thread, which is why the application locks
 	// its UI goroutine to an OS thread (runtime.LockOSThread in main).
@@ -189,6 +195,28 @@ const (
 	// errorAlreadyExists is ERROR_ALREADY_EXISTS, the last-error code
 	// CreateMutexW leaves set when the named mutex already existed.
 	errorAlreadyExists = 183
+
+	// Key messages and virtual-key codes used by the hotkey capture dialog.
+	// wmSysKeyDown is the one Alt combinations arrive as; capturing only
+	// wmKeyDown would miss every Alt+<key> the user presses and would also
+	// let Alt open the window's system menu.
+	wmKeyDown    = 0x0100
+	wmSysKeyDown = 0x0104
+
+	vkReturn  = 0x0D
+	vkEscape  = 0x1B
+	vkShift   = 0x10
+	vkControl = 0x11
+	vkMenu    = 0x12 // Alt
+	vkLWin    = 0x5B
+	vkRWin    = 0x5C
+
+	// keyPressedMask is the high bit GetKeyState sets while a key is down.
+	keyPressedMask = 0x8000
+
+	// ssCenter centers a STATIC control's text, used for the capture
+	// dialog's echo line.
+	ssCenter = 0x00000001
 
 	// Hotkeys. modNoRepeat (MOD_NOREPEAT) makes Windows deliver one
 	// WM_HOTKEY per press instead of repeating while the keys are held
