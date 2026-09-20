@@ -325,9 +325,26 @@ Then start `.\fenster.exe` and work through the list below.
     boolean would have dropped the `false` out of the file and silently
     re-enabled the feature here.)
 
+43. **Deploying replaces a running instance cleanly.** With fenster running,
+    run `.\deploy.ps1`. It reports building, stopping, installing and
+    starting. Watch the notification area as it runs: the icon disappears
+    when the old instance stops and comes back when the new one starts —
+    there must be no leftover ghost icon that only vanishes when you move
+    the mouse over it. *Check*: the tray menu works afterwards, and
+    `C:\Tools\fenster.exe` has the current timestamp.
+
+44. **Deploying with nothing running works.** Quit fenster from the tray
+    menu, then run `.\deploy.ps1`. It prints `nothing was running` and
+    completes normally.
+
+45. **`-quit` reports honestly.** With fenster running, run
+    `Start-Process .\fenster.exe -ArgumentList '-quit' -Wait -PassThru` and
+    check `.ExitCode` is 0; fenster exits. Repeat with nothing running: the
+    exit code is 1 and nothing happens.
+
 ## Reporting results
 
 For each item, record pass/fail and, on failure, the relevant excerpt from
-`fenster.log` or the differing part of `layouts.json`. These 42 items are
+`fenster.log` or the differing part of `layouts.json`. These 45 items are
 interactive and cannot be verified by an agent; they require a human with a
 real desktop session and are not covered by `go test`.

@@ -34,6 +34,20 @@ func main() {
 
 	win32.EnableDPIAwareness()
 
+	// `fenster.exe -quit` only signals an already-running instance and
+	// exits. It is handled before the single-instance guard on purpose:
+	// taking that mutex would make this process look like the second
+	// instance and report "fenster läuft bereits" instead of doing its job.
+	// The exit code is the only channel a -H=windowsgui build has — 0 when
+	// an instance was signalled, 1 when none was running — and deploy.ps1
+	// reads it.
+	if wantsQuit(os.Args) {
+		if !win32.SignalQuit() {
+			os.Exit(1)
+		}
+		return
+	}
+
 	release, alreadyRunning, err := win32.AcquireSingleInstance(`Local\fenster-single-instance`)
 	if err != nil {
 		// Failure to even attempt the check is not fatal: proceed as if this
@@ -99,7 +113,7 @@ func main() {
 		exePath:   exePath,
 	}
 
-	msgWindow, err := win32.NewMessageWindow("fensterMessageWindow", win32.Callbacks{
+	msgWindow, err := win32.NewMessageWindow(win32.MessageWindowClass, win32.Callbacks{
 		TrayClick:        app.onTrayClick,
 		TaskbarRecreated: app.onTaskbarRecreated,
 		DisplayChange:    app.onDisplayChange,
@@ -118,6 +132,22 @@ func main() {
 		return
 	}
 	app.trayIcon = trayIcon
+
+	// Shutdown cleanup lives here rather than in actionQuit so that every
+	// way this process can end runs it. The tray menu's "Beenden" is not
+	// the only one: `fenster.exe -quit` posts WM_CLOSE from another process
+	// (that is how deployment stops the running copy), which ends the
+	// message loop without going through any menu action. When only
+	// actionQuit removed the icon, that path left it orphaned in the
+	// notification area — visible until the shell next reaped it.
+	defer func() {
+		if app.hotkeys != nil {
+			app.hotkeys.sync(nil, "")
+		}
+		if err := trayIcon.Remove(); err != nil {
+			log.Printf("TrayIcon.Remove on shutdown: %v", err)
+		}
+	}()
 
 	if recoveredPath != "" {
 		app.notify(fmt.Sprintf(
@@ -808,15 +838,11 @@ func (a *application) actionOpenFolder() {
 	}
 }
 
+// actionQuit ends the message loop. Releasing the hotkeys and removing the
+// tray icon are deliberately NOT done here: main defers them so that a quit
+// arriving from outside this process — `fenster.exe -quit` during a
+// deployment — cleans up identically.
 func (a *application) actionQuit() {
-	// Windows releases a process's hotkeys when it exits, so this is
-	// belt-and-braces; it costs nothing and keeps the lifecycle symmetric.
-	if a.hotkeys != nil {
-		a.hotkeys.sync(nil, "")
-	}
-	if err := a.trayIcon.Remove(); err != nil {
-		log.Printf("TrayIcon.Remove: %v", err)
-	}
 	a.msgWindow.Quit()
 }
 

@@ -447,3 +447,53 @@ func (m *Menu) Destroy() {
 	m.subs = nil
 	procDestroyMenu.Call(m.handle)
 }
+
+// MessageWindowClass is the window class name fenster's hidden message
+// window is registered under. It is a constant rather than a string each
+// caller repeats because SignalQuit has to name the *same* class the running
+// instance created, and a typo in either place would fail silently: the
+// quit would report "nothing running" while the instance kept running.
+const MessageWindowClass = "fensterMessageWindow"
+
+// SignalQuit asks an already-running fenster to shut down and reports
+// whether one was found. It posts WM_CLOSE to the instance's hidden message
+// window, which is the same message the tray menu's "Beenden" sends, so the
+// instance exits through its own shutdown path rather than being killed.
+//
+// This exists for deployment: the binary cannot be overwritten while it is
+// running, and terminating the process instead would leave its icon sitting
+// in the notification area until the shell next reaps it.
+//
+// PostMessageW rather than SendMessageW: the target window belongs to
+// another process, and this call must not block on that process's message
+// loop getting around to it.
+func SignalQuit() bool { return signalQuitClass(MessageWindowClass) }
+
+// signalQuitClass is SignalQuit with the class name as a parameter, so the
+// find-and-close mechanism can be tested against a throwaway class without
+// closing a real fenster that happens to be running on the test machine.
+func signalQuitClass(class string) bool {
+	hwnd := findWindowByClass(class)
+	if hwnd == 0 {
+		return false
+	}
+	procPostMessageW.Call(hwnd, uintptr(wmClose), 0, 0)
+	return true
+}
+
+// findWindowByClass locates a window by class name WITHOUT acting on it,
+// returning 0 when there is none.
+//
+// Split out from signalQuitClass because the two are easy to confuse with
+// costly results: a caller that only wants to know whether an instance is
+// running must not use signalQuitClass, which closes the instance as a side
+// effect of answering. That mistake has already been made once here, in a
+// test guard meant to protect a live instance from the test.
+func findWindowByClass(class string) uintptr {
+	classPtr, err := syscall.UTF16PtrFromString(class)
+	if err != nil {
+		return 0
+	}
+	hwnd, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(classPtr)), 0)
+	return hwnd
+}
